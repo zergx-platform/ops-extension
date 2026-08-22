@@ -254,6 +254,74 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				return toJSON(builtinTemplates()), nil
 			},
 		},
+		"edit": {
+			Description: "Replace or insert lines in a sandbox file by line numbers.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"start_line": map[string]interface{}{"type": "integer"},
+					"end_line":   map[string]interface{}{"type": "integer"},
+					"path":       map[string]interface{}{"type": "string"},
+					"content":    map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"path", "start_line", "end_line"},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+				cid := strArg(args, "_container_id")
+				path := strArg(args, "path")
+				startLine := intArg64(args, "start_line", 0)
+				endLine := intArg64(args, "end_line", 0)
+				content := strArg(args, "content")
+				return s.sandboxEdit(ctx, cid, path, startLine, endLine, content)
+			},
+		},
+		"container-deploy": {
+			Description: "Deploy a container image as a Kubernetes deployment.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"image": map[string]interface{}{"type": "string"},
+					"name":  map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"image"},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+				image := strArg(args, "image")
+				name := strArg(args, "name")
+				if name == "" {
+					name = "app"
+				}
+				if err := s.k8s.EnsureDeployment(ctx, name, image, 1, 8080, nil); err != nil {
+					return "", fmt.Errorf("container-deploy failed: %w", err)
+				}
+				return fmt.Sprintf("Deployed '%s' from %s.", name, image), nil
+			},
+		},
+		"port": {
+			Description: "Copy a file from the sandbox into the repo (sandbox -> jj repo).",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"sandbox_path": map[string]interface{}{"type": "string"},
+					"repo_path":    map[string]interface{}{"type": "string"},
+					"message":      map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"sandbox_path", "repo_path"},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+				return s.portFile(ctx, args)
+			},
+		},
+		"image-list": {
+			Description: "List container images in the OCI registry.",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+				return s.imageList(ctx)
+			},
+		},
 	}
 }
 func strArg(args map[string]interface{}, k string) string {
@@ -261,6 +329,13 @@ func strArg(args map[string]interface{}, k string) string {
 		return v
 	}
 	return ""
+}
+
+func intArg64(args map[string]interface{}, k string, def int64) int64 {
+	if v, ok := args[k].(float64); ok {
+		return int64(v)
+	}
+	return def
 }
 
 func toJSON(v interface{}) string {
@@ -277,3 +352,118 @@ func jsonMarshalIndent(v interface{}) ([]byte, error) {
 
 // trimUnused keeps imports valid; remove if linters complain.
 var _ = strings.TrimSpace
+
+// sandboxEdit implements edit as read-modify-write over the worker sandbox.
+func (s *server) sandboxEdit(ctx context.Context, cid, path string, startLine, endLine int64, content string) (string, error) {
+	read, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{
+		"command": fmt.Sprintf("cat %s", shellQuote(path)),
+	})
+	if err != nil {
+		return "", fmt.Errorf("sandbox edit read failed: %w", err)
+	}
+	current := strVal(rawMap(read))
+	lines := strings.Split(current, "\n")
+	var newLines []string
+	if content != "" {
+		newLines = strings.Split(content, "\n")
+	}
+	if endLine < startLine {
+		// insert before startLine
+		insertAt := int(startLine)
+		if insertAt > len(lines) {
+			insertAt = len(lines)
+		}
+		v := append([]string{}, lines[:insertAt]...)
+		v = append(v, newLines...)
+		v = append(v, lines[insertAt:]...)
+		lines = v
+	} else {
+		sIdx := int(startLine)
+		eIdx := int(endLine + 1)
+		if eIdx > len(lines) {
+			eIdx = len(lines)
+		}
+		if sIdx > len(lines) {
+			sIdx = len(lines)
+		}
+		v := append([]string{}, lines[:sIdx]...)
+		v = append(v, newLines...)
+		v = append(v, lines[eIdx:]...)
+		lines = v
+	}
+	newContent := strings.Join(lines, "\n")
+	b64 := base64Encode(newContent)
+	cmd := fmt.Sprintf("mkdir -p \"$(dirname %s)\" && echo %s | base64 -d > %s", shellQuote(path), b64, shellQuote(path))
+	if _, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{"command": cmd}); err != nil {
+		return "", fmt.Errorf("sandbox edit write failed: %w", err)
+	}
+	return fmt.Sprintf("Edited sandbox file '%s'.", path), nil
+}
+
+// rawMap coerces the workerCommand result to map[string]interface{} without
+// importing encoding/json here (already available via util).
+func rawMap(v interface{}) map[string]interface{} {
+	if m, ok := v.(map[string]interface{}); ok {
+		return m
+	}
+	return map[string]interface{}{}
+}
+
+// strVal extracts a string field.
+func strVal(v map[string]interface{}) string {
+	if s, ok := v["content"].(string); ok {
+		return s
+	}
+	if s, ok := v["output"].(string); ok {
+		return s
+	}
+	if s, ok := v["result"].(string); ok {
+		return s
+	}
+	return ""
+}
+
+// portFile copies a file from the sandbox into the jj repo (Contents API).
+func (s *server) portFile(ctx context.Context, args map[string]interface{}) (string, error) {
+	cid := strArg(args, "_container_id")
+	sandboxPath := strArg(args, "sandbox_path")
+	repoPath := strArg(args, "repo_path")
+	message := strArg(args, "message")
+	if message == "" {
+		message = "port " + sandboxPath
+	}
+
+	// 1. Read from sandbox (worker).
+	read, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{
+		"command": fmt.Sprintf("cat %s", shellQuote(sandboxPath)),
+	})
+	if err != nil {
+		return "", fmt.Errorf("port sandbox read failed: %w", err)
+	}
+	content := strVal(rawMap(read))
+
+	// 2. Write to jj-server via Contents API (base64).
+	org := strArg(args, "_org")
+	repo := strArg(args, "_repo")
+	branch := strArg(args, "_branch")
+	if branch == "" {
+		branch = "main"
+	}
+	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/%s/contents/%s",
+		s.builder, urlPathEscape(org), urlPathEscape(repo), urlPathEscape(branch), escapePath(repoPath))
+	body := map[string]interface{}{
+		"content": base64Encode(content),
+		"message": message,
+	}
+	if _, err := s.httpPutJSON(ctx, url, body); err != nil {
+		return "", fmt.Errorf("port write failed: %w", err)
+	}
+	return fmt.Sprintf("Ported '%s' to repo '%s'.", sandboxPath, repoPath), nil
+}
+
+// imageList queries the OCI registry catalog (GET /v2/_catalog) and returns the
+// repository names. registryHost is the OCI store (e.g. rucoder-zot...).
+func (s *server) imageList(ctx context.Context) (string, error) {
+	url := fmt.Sprintf("https://%s/v2/_catalog", s.registryHost)
+	return s.httpGetJSON(ctx, url)
+}

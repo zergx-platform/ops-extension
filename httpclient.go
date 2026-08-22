@@ -51,6 +51,30 @@ func (s *server) httpPostJSON(ctx context.Context, url string, body interface{})
 	return toJSON(v), nil
 }
 
+// httpPutJSON PUTs a JSON body and returns the pretty-printed response.
+func (s *server) httpPutJSON(ctx context.Context, url string, body interface{}) (string, error) {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(b))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var v interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return "", err
+	}
+	return toJSON(v), nil
+}
+
 // selfBase returns the HTTP base of this instance for self-invoking build.
 func selfBase() string {
 	return "http://127.0.0.1:" + portValue

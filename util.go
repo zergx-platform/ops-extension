@@ -4,7 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -31,4 +33,18 @@ func base64Encode(s string) string {
 
 func marshalIndent(v interface{}) ([]byte, error) {
 	return json.MarshalIndent(v, "", "  ")
+}
+
+func urlPathEscape(s string) string {
+	return url.PathEscape(s)
+}
+
+// escapePath escapes each path segment, keeping slashes as separators.
+func escapePath(p string) string {
+	p = strings.TrimPrefix(p, "/")
+	parts := strings.Split(p, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
 }
