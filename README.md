@@ -52,8 +52,8 @@ Builder: `/images/build`, `/containerfile-templates`.
 | `RUCODER_K8S_NAMESPACE` | `temp` |
 | `RUCODER_WORKER_IMAGE`  | `recoder-dev002.../rucoder-worker:dev` |
 | `RUCODER_BUILDKIT_ADDR` | `tcp://rucoder-buildkitd.temp.svc.cluster.local:1234` |
-| `RUCODER_REGISTRY`      | `recoder-dev002...` |
-| `RUCODER_REGISTRY_URL`  | `http://rucoder-registry...` |
+| `RUCODER_REGISTRY`      | `rucoder-zot.temp.10.199.64.20.nip.io` (OCI registry host, for image tags/push) |
+| `RUCODER_REGISTRY_URL`  | `http://rucoder-registry...` (package-metadata service) |
 | `RUCODER_REPO_MANAGER_URL` | `http://rucoder-repo-manager...` |
 | `NATS_URL`              | `nats://nats.develop.svc.cluster.local:4222` |
 | `RUCODER_PORT`          | `8080` |

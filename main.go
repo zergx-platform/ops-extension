@@ -17,11 +17,12 @@ import (
 )
 
 type server struct {
-	k8s      *k8s.Manager
-	ext      *extensionsdk.Extension
-	buildkit *buildkit.Client
-	registry string
-	builder  string
+	k8s          *k8s.Manager
+	ext          *extensionsdk.Extension
+	buildkit     *buildkit.Client
+	registry     string // package-metadata service URL
+	registryHost string // OCI registry host for image tag qualification
+	builder      string // repo-manager URL (archive source)
 }
 
 func main() {
@@ -32,7 +33,9 @@ func main() {
 	portValue = port
 	buildkitAddr := envOr("RUCODER_BUILDKIT_ADDR", "tcp://rucoder-buildkitd.temp.svc.cluster.local:1234")
 	repoManager := envOr("RUCODER_REPO_MANAGER_URL", "http://rucoder-repo-manager.develop.svc.cluster.local:80")
-	registry := envOr("RUCODER_REGISTRY", "recoder-dev002.develop.10.199.64.20.nip.io")
+	// Image registry host (OCI store) used to qualify image tags for push.
+	registryHost := envOr("RUCODER_REGISTRY", "rucoder-zot.temp.10.199.64.20.nip.io")
+	// Package-metadata service (rucoder-registry), not the OCI store.
 	registryURL := envOr("RUCODER_REGISTRY_URL", "http://rucoder-registry.develop.svc.cluster.local:80")
 
 	km, err := k8s.NewManager(k8s.Config{Namespace: ns, WorkerImage: img})
@@ -41,10 +44,11 @@ func main() {
 	}
 
 	s := &server{
-		k8s:      km,
-		buildkit: buildkit.New(buildkitAddr),
-		registry: registryURL,
-		builder:  repoManager, // repo-manager serves the archive source
+		k8s:          km,
+		buildkit:     buildkit.New(buildkitAddr),
+		registryHost: registryHost,
+		registry:     registryURL,
+		builder:      repoManager, // repo-manager serves the archive source
 	}
 
 	ext, err := extensionsdk.Register(extensionsdk.Config{
@@ -81,7 +85,7 @@ func main() {
 	})
 
 	addr := ":" + port
-	fmt.Printf("[ops-extension] listening on %s (buildkit=%s registry=%s)\n", addr, buildkitAddr, registry)
+	fmt.Printf("[ops-extension] listening on %s (buildkit=%s registry=%s)\n", addr, buildkitAddr, registryHost)
 	if err := http.ListenAndServe(addr, r); err != nil {
 		panic(err)
 	}

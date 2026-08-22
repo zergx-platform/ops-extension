@@ -81,8 +81,8 @@ func (s *server) buildImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Full registry-qualified tag.
-	fullTag := fmt.Sprintf("%s/%s:%s", s.registry, b.Tag, b.Bookmark)
+	// 3. Full registry-qualified tag (against the OCI registry host).
+	fullTag := fmt.Sprintf("%s/%s:%s", s.registryHost, b.Tag, b.Bookmark)
 	if b.Dockerfile == "" {
 		b.Dockerfile = "Dockerfile"
 	}
