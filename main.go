@@ -7,17 +7,21 @@ import (
 	"net/http"
 	"os"
 
+	extensionsdk "forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	extensionsdk "rucoder-agent/extension-sdk-go"
 
+	"rucoder-agent/ops-extension/internal/buildkit"
 	"rucoder-agent/ops-extension/internal/k8s"
 	"rucoder-agent/ops-extension/internal/worker"
 )
 
 type server struct {
-	k8s *k8s.Manager
-	ext *extensionsdk.Extension
+	k8s      *k8s.Manager
+	ext      *extensionsdk.Extension
+	buildkit *buildkit.Client
+	registry string
+	builder  string
 }
 
 func main() {
@@ -25,15 +29,24 @@ func main() {
 	img := envOr("RUCODER_WORKER_IMAGE", "recoder-dev002.develop.10.199.64.20.nip.io/rucoder-worker:dev")
 	natsURL := envOr("NATS_URL", "nats://nats.develop.svc.cluster.local:4222")
 	port := envOr("RUCODER_PORT", "8080")
+	portValue = port
+	buildkitAddr := envOr("RUCODER_BUILDKIT_ADDR", "tcp://rucoder-buildkitd.temp.svc.cluster.local:1234")
+	repoManager := envOr("RUCODER_REPO_MANAGER_URL", "http://rucoder-repo-manager.develop.svc.cluster.local:80")
+	registry := envOr("RUCODER_REGISTRY", "recoder-dev002.develop.10.199.64.20.nip.io")
+	registryURL := envOr("RUCODER_REGISTRY_URL", "http://rucoder-registry.develop.svc.cluster.local:80")
 
 	km, err := k8s.NewManager(k8s.Config{Namespace: ns, WorkerImage: img})
 	if err != nil {
 		panic(fmt.Sprintf("k8s: %v", err))
 	}
 
-	s := &server{k8s: km}
+	s := &server{
+		k8s:      km,
+		buildkit: buildkit.New(buildkitAddr),
+		registry: registryURL,
+		builder:  repoManager, // repo-manager serves the archive source
+	}
 
-	// Register the NATS extension (tools only in phase 1).
 	ext, err := extensionsdk.Register(extensionsdk.Config{
 		ID:      "ops-extension",
 		Version: "0.1.0",
@@ -63,10 +76,12 @@ func main() {
 		r.Post("/sandbox/write", s.sandboxWrite)
 		r.Post("/deploy", s.deploy)
 		r.Get("/infra/k8s/config", s.k8sConfig)
+		r.Post("/images/build", s.buildImage)
+		r.Get("/containerfile-templates", s.containerfileTemplates)
 	})
 
 	addr := ":" + port
-	fmt.Printf("[ops-extension] listening on %s\n", addr)
+	fmt.Printf("[ops-extension] listening on %s (buildkit=%s registry=%s)\n", addr, buildkitAddr, registry)
 	if err := http.ListenAndServe(addr, r); err != nil {
 		panic(err)
 	}

@@ -1,62 +1,59 @@
 # ops-extension
 
-Go single-binary extension server replacing the original `executor` +
-`sandbox-tools` + (phase 2) `builder` + `artifact-tools` Rust services.
+Go single-binary extension server replacing the original Rust `executor` +
+`sandbox-tools` + `builder` + `artifact-tools` services. No external binaries
+(`kubectl`/`buildctl`) — it uses `client-go`, `moby/buildkit`, and
+`gorilla/websocket` directly.
 
-## What it does
+## Capabilities
 
-- **NATS extension** (tools + discovery) for the agent, via
-  `rucoder-agent/extension-sdk-go`.
-- **HTTP API** for the recoder-neo frontend (executor surface).
-- **Dynamic worker pods**: uses `client-go` to start/stop sandbox pods — no
-  `kubectl` binary.
-- **Worker WebSocket RPC**: `execute` / `jobs` / `file_*` / `kill` etc. —
-  the worker stays a separate service running inside each sandbox pod.
+- **NATS extension** (tools + discovery) for the agent via
+  `forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go`.
+- **HTTP API** for the recoder-neo frontend (executor + builder surface).
+- **Dynamic worker pods** via `client-go` (no `kubectl`).
+- **Worker WebSocket RPC** via `gorilla/websocket`.
+- **Image builds** via `moby/buildkit` (no `buildctl`).
 
-## Build
+## Dependency
+
+`extension-sdk-go` is pulled from forgejo by git URL (not a local `replace`):
+
+```
+forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.2
+```
+
+Build with private-module env:
 
 ```bash
-# extension-sdk-go must be checked out as a sibling directory.
+GOINSECURE=forgejo.develop.10.199.64.20.nip.io \
+GOPRIVATE=forgejo.develop.10.199.64.20.nip.io \
 go build ./...
 ```
 
-The dependency is a local module (`replace` directive):
+## HTTP surface
 
-```go
-replace rucoder-agent/extension-sdk-go => ../extension-sdk-go
-```
+Executor: `/containers` (+ `/{cid}`, `/{cid}/exec`, `/{cid}/jobs*`, `/{cid}/kill/{job_id}`),
+`/sandbox/read`, `/sandbox/write`, `/deploy`, `/infra/k8s/config`.
 
-For a self-contained CI build, vendor the SDK or build from a parent
-workspace. The `Dockerfile` assumes both repos are in the same build context.
+Builder: `/images/build`, `/containerfile-templates`.
 
-## HTTP surface (executor parity)
+## NATS tools
 
-| Method | Path |
-| ------ | ---- |
-| GET    | `/api/v1/health` |
-| GET/POST | `/api/v1/containers` |
-| DELETE | `/api/v1/containers/{cid}` |
-| POST   | `/api/v1/containers/{cid}/exec` |
-| GET    | `/api/v1/containers/{cid}/jobs` |
-| GET    | `/api/v1/containers/{cid}/jobs/{job_id}/output` |
-| POST   | `/api/v1/containers/{cid}/jobs/{job_id}/wait` |
-| POST   | `/api/v1/containers/{cid}/jobs/{job_id}/stdin` |
-| POST   | `/api/v1/containers/{cid}/kill/{job_id}` |
-| POST   | `/api/v1/sandbox/read` |
-| POST   | `/api/v1/sandbox/write` |
-| POST   | `/api/v1/deploy` |
-| GET    | `/api/v1/infra/k8s/config` |
+**Phase 1 (sandbox)** — `bash`, `read`, `write`, `job_list`, `job_output`,
+`job_wait`, `job_stdin`, `job_kill`.
 
-## NATS tools (phase 1)
-
-`bash`, `read`, `write`, `job_list`, `job_output`, `job_wait`, `job_stdin`,
-`job_kill`.
+**Phase 2 (artifact)** — `list-registry-packages`, `package-publish`,
+`pull-git-repo`, `container-build`, `list-containerfile-templates`.
 
 ## Config
 
 | Env | Default |
 | --- | ------- |
 | `RUCODER_K8S_NAMESPACE` | `temp` |
-| `RUCODER_WORKER_IMAGE` | `recoder-dev002.../rucoder-worker:dev` |
-| `NATS_URL` | `nats://nats.develop.svc.cluster.local:4222` |
-| `RUCODER_PORT` | `8080` |
+| `RUCODER_WORKER_IMAGE`  | `recoder-dev002.../rucoder-worker:dev` |
+| `RUCODER_BUILDKIT_ADDR` | `tcp://rucoder-buildkitd.temp.svc.cluster.local:1234` |
+| `RUCODER_REGISTRY`      | `recoder-dev002...` |
+| `RUCODER_REGISTRY_URL`  | `http://rucoder-registry...` |
+| `RUCODER_REPO_MANAGER_URL` | `http://rucoder-repo-manager...` |
+| `NATS_URL`              | `nats://nats.develop.svc.cluster.local:4222` |
+| `RUCODER_PORT`          | `8080` |

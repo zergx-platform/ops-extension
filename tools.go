@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	extensionsdk "rucoder-agent/extension-sdk-go"
+	extensionsdk "forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go"
 )
 
 // tools returns the phase-1 NATS tools (sandbox + container). These mirror the
@@ -167,9 +167,95 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				return toJSON(res), nil
 			},
 		},
+		"list-registry-packages": {
+			Description: "List packages and versions published to the registry.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"protocol": map[string]interface{}{"type": "string"},
+					"name":     map[string]interface{}{"type": "string"},
+				},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+				return s.httpGetJSON(ctx, s.registry+"/api/v1/packages/list")
+			},
+		},
+		"package-publish": {
+			Description: "Publish a built artifact to the embedded package registry.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"protocol": map[string]interface{}{"type": "string"},
+					"image":    map[string]interface{}{"type": "string"},
+					"name":     map[string]interface{}{"type": "string"},
+					"version":  map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"protocol"},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+				body := map[string]interface{}{
+					"protocol": strArg(args, "protocol"),
+					"image":    strArg(args, "image"),
+					"name":     strArg(args, "name"),
+					"version":  strArg(args, "version"),
+				}
+				return s.httpPostJSON(ctx, s.registry+"/api/v1/packages/publish", body)
+			},
+		},
+		"pull-git-repo": {
+			Description: "Pull a git repository from a remote URL into local storage.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"git_url": map[string]interface{}{"type": "string"},
+					"branch":  map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"git_url"},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+				body := map[string]interface{}{
+					"git_url": strArg(args, "git_url"),
+					"branch":  strArg(args, "branch"),
+				}
+				return s.httpPostJSON(ctx, s.registry+"/api/v1/packages/pull-git", body)
+			},
+		},
+		"container-build": {
+			Description: "Build a container image from a Containerfile in the repo using the remote buildkit builder.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"dockerfile_path": map[string]interface{}{"type": "string"},
+					"tag":             map[string]interface{}{"type": "string"},
+					"context":         map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"dockerfile_path", "tag"},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+				payload := map[string]interface{}{
+					"org":        strArg(args, "_org"),
+					"repo":       strArg(args, "_repo"),
+					"bookmark":   strArg(args, "_branch"),
+					"dockerfile": strArg(args, "dockerfile_path"),
+					"tag":        strArg(args, "tag"),
+					"context":    strArg(args, "context"),
+					"push":       true,
+				}
+				res, err := s.httpPostJSON(ctx, selfBase()+"/api/v1/images/build", payload)
+				if err != nil {
+					return "", fmt.Errorf("container-build failed: %w", err)
+				}
+				return res, nil
+			},
+		},
+		"list-containerfile-templates": {
+			Description: "List built-in Containerfile/build templates.",
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+				return toJSON(builtinTemplates()), nil
+			},
+		},
 	}
 }
-
 func strArg(args map[string]interface{}, k string) string {
 	if v, ok := args[k].(string); ok {
 		return v
