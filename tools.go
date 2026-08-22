@@ -22,17 +22,17 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"command"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				command := strArg(args, "command")
 				if command == "" {
-					return "", fmt.Errorf("bash: missing 'command'")
+					return "", nil, fmt.Errorf("bash: missing 'command'")
 				}
 				res, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{"command": command})
 				if err != nil {
-					return "", fmt.Errorf("bash failed: %w", err)
+					return "", nil, fmt.Errorf("bash failed: %w", err)
 				}
-				return toJSON(res), nil
+				return toJSON(res), nil, nil
 			},
 		},
 		"read": {
@@ -44,16 +44,16 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"path"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				path := strArg(args, "path")
 				res, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{
 					"command": fmt.Sprintf("cat %s", shellQuote(path)),
 				})
 				if err != nil {
-					return "", fmt.Errorf("sandbox read failed: %w", err)
+					return "", nil, fmt.Errorf("sandbox read failed: %w", err)
 				}
-				return toJSON(res), nil
+				return toJSON(res), nil, nil
 			},
 		},
 		"write": {
@@ -66,27 +66,27 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"path", "content"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				path := strArg(args, "path")
 				content := strArg(args, "content")
 				b64 := base64Encode(content)
 				cmd := fmt.Sprintf("mkdir -p \"$(dirname %s)\" && echo %s | base64 -d > %s", shellQuote(path), b64, shellQuote(path))
 				if _, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{"command": cmd}); err != nil {
-					return "", fmt.Errorf("sandbox write failed: %w", err)
+					return "", nil, fmt.Errorf("sandbox write failed: %w", err)
 				}
-				return fmt.Sprintf("Wrote sandbox file '%s'.", path), nil
+				return fmt.Sprintf("Wrote sandbox file '%s'.", path), nil, nil
 			},
 		},
 		"job_list": {
 			Description: "List background jobs in the sandbox.",
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				res, err := s.workerCommand(ctx, cid, "jobs", map[string]interface{}{})
 				if err != nil {
-					return "", fmt.Errorf("job_list failed: %w", err)
+					return "", nil, fmt.Errorf("job_list failed: %w", err)
 				}
-				return toJSON(res), nil
+				return toJSON(res), nil, nil
 			},
 		},
 		"job_output": {
@@ -98,14 +98,14 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"job_id"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				jobID := strArg(args, "job_id")
 				res, err := s.workerCommand(ctx, cid, "job_output", map[string]interface{}{"job_id": jobID})
 				if err != nil {
-					return "", fmt.Errorf("job_output failed: %w", err)
+					return "", nil, fmt.Errorf("job_output failed: %w", err)
 				}
-				return toJSON(res), nil
+				return toJSON(res), nil, nil
 			},
 		},
 		"job_kill": {
@@ -117,14 +117,14 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"job_id"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				jobID := strArg(args, "job_id")
 				res, err := s.workerCommand(ctx, cid, "kill", map[string]interface{}{"job_id": jobID})
 				if err != nil {
-					return "", fmt.Errorf("job_kill failed: %w", err)
+					return "", nil, fmt.Errorf("job_kill failed: %w", err)
 				}
-				return toJSON(res), nil
+				return toJSON(res), nil, nil
 			},
 		},
 		"job_wait": {
@@ -136,14 +136,14 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"job_id"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				jobID := strArg(args, "job_id")
 				res, err := s.workerCommand(ctx, cid, "job_wait", map[string]interface{}{"job_id": jobID, "timeout_ms": 30000})
 				if err != nil {
-					return "", fmt.Errorf("job_wait failed: %w", err)
+					return "", nil, fmt.Errorf("job_wait failed: %w", err)
 				}
-				return toJSON(res), nil
+				return toJSON(res), nil, nil
 			},
 		},
 		"job_stdin": {
@@ -156,15 +156,15 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"job_id", "data"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				jobID := strArg(args, "job_id")
 				data := strArg(args, "data")
 				res, err := s.workerCommand(ctx, cid, "job_stdin", map[string]interface{}{"job_id": jobID, "data": data})
 				if err != nil {
-					return "", fmt.Errorf("job_stdin failed: %w", err)
+					return "", nil, fmt.Errorf("job_stdin failed: %w", err)
 				}
-				return toJSON(res), nil
+				return toJSON(res), nil, nil
 			},
 		},
 		"list-registry-packages": {
@@ -176,8 +176,9 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 					"name":     map[string]interface{}{"type": "string"},
 				},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
-				return s.httpGetJSON(ctx, s.registry+"/api/v1/packages/list")
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				v, err := s.httpGetJSON(ctx, s.registry+"/api/v1/packages/list")
+				return v, nil, err
 			},
 		},
 		"package-publish": {
@@ -192,14 +193,15 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"protocol"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				body := map[string]interface{}{
 					"protocol": strArg(args, "protocol"),
 					"image":    strArg(args, "image"),
 					"name":     strArg(args, "name"),
 					"version":  strArg(args, "version"),
 				}
-				return s.httpPostJSON(ctx, s.registry+"/api/v1/packages/publish", body)
+				v, err := s.httpPostJSON(ctx, s.registry+"/api/v1/packages/publish", body)
+				return v, nil, err
 			},
 		},
 		"pull-git-repo": {
@@ -212,12 +214,13 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"git_url"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				body := map[string]interface{}{
 					"git_url": strArg(args, "git_url"),
 					"branch":  strArg(args, "branch"),
 				}
-				return s.httpPostJSON(ctx, s.registry+"/api/v1/packages/pull-git", body)
+				v, err := s.httpPostJSON(ctx, s.registry+"/api/v1/packages/pull-git", body)
+				return v, nil, err
 			},
 		},
 		"container-build": {
@@ -231,7 +234,7 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"dockerfile_path", "tag"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				payload := map[string]interface{}{
 					"org":        strArg(args, "_org"),
 					"repo":       strArg(args, "_repo"),
@@ -243,15 +246,15 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				}
 				res, err := s.httpPostJSON(ctx, selfBase()+"/api/v1/images/build", payload)
 				if err != nil {
-					return "", fmt.Errorf("container-build failed: %w", err)
+					return "", nil, fmt.Errorf("container-build failed: %w", err)
 				}
-				return res, nil
+				return res, nil, nil
 			},
 		},
 		"list-containerfile-templates": {
 			Description: "List built-in Containerfile/build templates.",
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
-				return toJSON(builtinTemplates()), nil
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				return toJSON(builtinTemplates()), nil, nil
 			},
 		},
 		"edit": {
@@ -266,13 +269,14 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"path", "start_line", "end_line"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				path := strArg(args, "path")
 				startLine := intArg64(args, "start_line", 0)
 				endLine := intArg64(args, "end_line", 0)
 				content := strArg(args, "content")
-				return s.sandboxEdit(ctx, cid, path, startLine, endLine, content)
+				v, err := s.sandboxEdit(ctx, cid, path, startLine, endLine, content)
+				return v, nil, err
 			},
 		},
 		"container-deploy": {
@@ -285,16 +289,16 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"image"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				image := strArg(args, "image")
 				name := strArg(args, "name")
 				if name == "" {
 					name = "app"
 				}
 				if err := s.k8s.EnsureDeployment(ctx, name, image, 1, 8080, nil); err != nil {
-					return "", fmt.Errorf("container-deploy failed: %w", err)
+					return "", nil, fmt.Errorf("container-deploy failed: %w", err)
 				}
-				return fmt.Sprintf("Deployed '%s' from %s.", name, image), nil
+				return fmt.Sprintf("Deployed '%s' from %s.", name, image), nil, nil
 			},
 		},
 		"port": {
@@ -308,8 +312,9 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"sandbox_path", "repo_path"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
-				return s.portFile(ctx, args)
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				v, err := s.portFile(ctx, args)
+				return v, nil, err
 			},
 		},
 		"image-list": {
@@ -318,8 +323,9 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				"type":       "object",
 				"properties": map[string]interface{}{},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, error) {
-				return s.imageList(ctx)
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				v, err := s.imageList(ctx)
+				return v, nil, err
 			},
 		},
 	}
