@@ -9,10 +9,13 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"os"
 )
 
 const (
@@ -23,6 +26,12 @@ const (
 type Config struct {
 	Namespace   string
 	WorkerImage string
+	// Resource requests/limits for worker containers. Namespaces with a
+	// ResourceQuota (like temp) reject pods without them.
+	CPURequest    string
+	CPULimit      string
+	MemoryRequest string
+	MemoryLimit   string
 }
 
 // ContainerInfo is a running worker pod.
@@ -41,9 +50,21 @@ type Manager struct {
 	config Config
 }
 
-// NewManager builds an in-cluster Manager.
+// NewManager builds a Manager. Rest config resolution: explicit
+// RUCODER_KUBECONFIG (verification instances), then in-cluster service
+// account, then $KUBECONFIG / ~/.kube/config.
 func NewManager(cfg Config) (*Manager, error) {
-	r, err := rest.InClusterConfig()
+	var r *rest.Config
+	var err error
+	if explicit := os.Getenv("RUCODER_KUBECONFIG"); explicit != "" {
+		r, err = clientcmd.BuildConfigFromFlags("", explicit)
+	} else {
+		r, err = rest.InClusterConfig()
+		if err != nil {
+			loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+			r, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, &clientcmd.ConfigOverrides{}).ClientConfig()
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +148,16 @@ func (m *Manager) EnsureContainer(ctx context.Context, containerID, image string
 					Image:           image,
 					ImagePullPolicy: corev1.PullAlways,
 					Ports:           []corev1.ContainerPort{{ContainerPort: workerPort}},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse(orDefault(m.config.CPURequest, "250m")),
+							corev1.ResourceMemory: resource.MustParse(orDefault(m.config.MemoryRequest, "256Mi")),
+						},
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse(orDefault(m.config.CPULimit, "1")),
+							corev1.ResourceMemory: resource.MustParse(orDefault(m.config.MemoryLimit, "1Gi")),
+						},
+					},
 					ReadinessProbe: &corev1.Probe{
 						ProbeHandler: corev1.ProbeHandler{
 							TCPSocket: &corev1.TCPSocketAction{
@@ -204,10 +235,27 @@ func (m *Manager) getContainer(ctx context.Context, containerID string) (Contain
 }
 
 // DestroyContainer deletes the pod + service for a container ID.
+// DestroyContainer removes the worker pod + service. The ID may be the
+// container UUID/label, the pod name, or the "sandbox-*" short form — other
+// surfaces (resolveWorkerURL) accept any of these, so deletion must too.
 func (m *Manager) DestroyContainer(ctx context.Context, containerID string) error {
-	name := podName(containerID)
-	_ = m.client.CoreV1().Pods(m.config.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
-	_ = m.client.CoreV1().Services(m.config.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	name := containerID
+	if _, err := m.client.CoreV1().Pods(m.config.Namespace).Get(ctx, name, metav1.GetOptions{}); err != nil {
+		// Not a literal pod name; resolve via the label (UUID/session) or the
+		// derived short form.
+		if pods, lerr := m.client.CoreV1().Pods(m.config.Namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app=sandbox,rucoder/container=" + containerID,
+		}); lerr == nil && len(pods.Items) > 0 {
+			name = pods.Items[0].Name
+		} else {
+			name = podName(containerID)
+		}
+	}
+	perr := m.client.CoreV1().Pods(m.config.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	serr := m.client.CoreV1().Services(m.config.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if perr != nil && serr != nil {
+		return fmt.Errorf("delete %s: pod: %v, service: %v", name, perr, serr)
+	}
 	return nil
 }
 
@@ -279,4 +327,11 @@ func max(a, b int32) int32 {
 		return a
 	}
 	return b
+}
+
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }

@@ -1,7 +1,5 @@
-forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.2 h1:BP7/zUqW14C/vfI8UVp3akFmzJpgcsqoCL06T8onmMY=
-forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.2/go.mod h1:jdmfV7OYQ7lnvsDpc8RBJ0sFqLmUW0UydtdgNsheeC0=
-forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.3 h1:lIkEZbIdh2gw/wiYsXASO/NVcdWkuCscYuNPbdxnzDI=
-forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.3/go.mod h1:jdmfV7OYQ7lnvsDpc8RBJ0sFqLmUW0UydtdgNsheeC0=
+forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.4 h1:IJGJLzvfBXfQtz6RWAfOxpGIcJAnBX7cZuDV/xw+4Vc=
+forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.4/go.mod h1:jdmfV7OYQ7lnvsDpc8RBJ0sFqLmUW0UydtdgNsheeC0=
 github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 h1:He8afgbRMd7mFxO99hRNu+6tazq8nFF9lIwo9JFroBk=
 github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6/go.mod h1:8o94RPi1/7XTJvwPpRSzSUedZrtlirdB3r9Z20bi2f8=
 github.com/Microsoft/go-winio v0.6.3-0.20251027160822-ad3df93bed29 h1:0kQAzHq8vLs7Pptv+7TxjdETLf/nIqJpIB4oC6Ba4vY=
@@ -208,11 +206,8 @@ github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+
 github.com/stretchr/objx v0.5.2 h1:xuMeJ0Sdp5ZMRXx/aWO6RZxdr3beISkG5/G/aIRr3pY=
 github.com/stretchr/objx v0.5.2/go.mod h1:FRsXN1f5AsAjCGJKqEizvkpNtU+EGNCLh3NxZ/8L+MA=
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
-github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
-github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/stretchr/testify v1.12.0 h1:K6Mr6jO9JICuend/5xzTM03ydSV3vdNRYAdPSukj8uI=
-github.com/tonistiigi/fsutil v0.0.0-20260717003753-6d9dc2ebad62 h1:uppBiK+tE8tYG6fc0N8VnsC7FMZcWxnXIyaQ9GcUIU8=
-github.com/tonistiigi/fsutil v0.0.0-20260717003753-6d9dc2ebad62/go.mod h1:K5zrLch9UaSGNiek5XHZeqZUf1zPWJHqDfLIcnpquQ4=
+github.com/stretchr/testify v1.12.0/go.mod h1:bOYBZb5qJ00vPzWfIqBUZPaxK8jWiXc6d3ErP4Ca9Gw=
 github.com/tonistiigi/fsutil v0.0.0-20260819142231-83cac42c1c52 h1:SGUsSbltLA7/kcCcWVaw6FtqkwvOCM9Ypq0ZLtsVbUE=
 github.com/tonistiigi/fsutil v0.0.0-20260819142231-83cac42c1c52/go.mod h1:oO0lfhK8QAY3alnpiYXcRVjyVx95XGWZE3K2M+AqfcM=
 github.com/tonistiigi/go-csvvalue v0.0.0-20240814133006-030d3b2625d0 h1:2f304B10LaZdB8kkVEaoXvAMVan2tl9AiK4G0odjQtE=

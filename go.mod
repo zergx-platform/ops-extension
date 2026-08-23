@@ -3,7 +3,7 @@ module rucoder-agent/ops-extension
 go 1.26.3
 
 require (
-	forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.3
+	forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.4
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
@@ -71,6 +71,7 @@ require (
 	github.com/secure-systems-lab/go-securesystemslib v0.11.0 // indirect
 	github.com/shibumi/go-pathspec v1.3.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.69.0 // indirect

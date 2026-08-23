@@ -17,12 +17,13 @@ import (
 )
 
 type server struct {
-	k8s          *k8s.Manager
-	ext          *extensionsdk.Extension
-	buildkit     *buildkit.Client
-	registry     string // package-metadata service URL
-	registryHost string // OCI registry host for image tag qualification
-	builder      string // repo-manager URL (archive source)
+	k8s               *k8s.Manager
+	ext               *extensionsdk.Extension
+	buildkit          *buildkit.Client
+	artifact          string // artifact registry base URL (packages + OCI + metadata)
+	artifactImageHost string // TLS ingress host for image refs (FROM/push via buildkit)
+	artifactToken     string // optional bearer/basic token for artifact write auth
+	jj                string // jj-server URL (repo archive + contents + clone)
 }
 
 func main() {
@@ -32,36 +33,62 @@ func main() {
 	port := envOr("RUCODER_PORT", "8080")
 	portValue = port
 	buildkitAddr := envOr("RUCODER_BUILDKIT_ADDR", "tcp://rucoder-buildkitd.temp.svc.cluster.local:1234")
-	repoManager := envOr("RUCODER_REPO_MANAGER_URL", "http://rucoder-repo-manager.develop.svc.cluster.local:80")
-	// Image registry host (OCI store) used to qualify image tags for push.
-	registryHost := envOr("RUCODER_REGISTRY", "rucoder-zot.temp.10.199.64.20.nip.io")
-	// Package-metadata service (rucoder-registry), not the OCI store.
-	registryURL := envOr("RUCODER_REGISTRY_URL", "http://rucoder-registry.develop.svc.cluster.local:80")
+	// jj-server replaces the old repo-manager (archive + contents + clone).
+	// The cluster service is named rucoder-repo (jj-server is the binary).
+	jj := envOr("RUCODER_JJ_SERVER_URL", envOr("RUCODER_REPO_MANAGER_URL", "http://rucoder-repo.temp.svc.cluster.local:80"))
+	// Artifact registry replaces zot (OCI store) + rucoder-registry (metadata):
+	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
+	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
+	// used for API calls and in-container CLI uploads.
+	artifact := trimTrailingSlash(envOr("RUCODER_ARTIFACT_URL", "http://rucoder-artifact.temp.svc.cluster.local:80"))
+	// Image references (buildkit FROM/push) must go through the TLS ingress
+	// host configured as insecure in buildkitd's registry config — the svc
+	// host is plain HTTP which buildkit cannot pull/push to.
+	artifactImageHost := envOr("RUCODER_ARTIFACT_IMAGE_HOST", "rucoder-artifact.temp.10.199.64.20.nip.io")
+	artifactToken := envOr("RUCODER_ARTIFACT_TOKEN", "")
 
-	km, err := k8s.NewManager(k8s.Config{Namespace: ns, WorkerImage: img})
+	km, err := k8s.NewManager(k8s.Config{
+		Namespace:     ns,
+		WorkerImage:   img,
+		CPURequest:    envOr("RUCODER_WORKER_CPU_REQUEST", ""),
+		CPULimit:      envOr("RUCODER_WORKER_CPU_LIMIT", ""),
+		MemoryRequest: envOr("RUCODER_WORKER_MEM_REQUEST", ""),
+		MemoryLimit:   envOr("RUCODER_WORKER_MEM_LIMIT", ""),
+	})
 	if err != nil {
 		panic(fmt.Sprintf("k8s: %v", err))
 	}
 
 	s := &server{
-		k8s:          km,
-		buildkit:     buildkit.New(buildkitAddr),
-		registryHost: registryHost,
-		registry:     registryURL,
-		builder:      repoManager, // repo-manager serves the archive source
+		k8s:               km,
+		buildkit:          buildkit.New(buildkitAddr),
+		artifact:          artifact,
+		artifactImageHost: artifactImageHost,
+		artifactToken:     artifactToken,
+		jj:                jj,
 	}
 
-	ext, err := extensionsdk.Register(extensionsdk.Config{
-		ID:      "ops-extension",
-		Version: "0.1.0",
-		NATSURL: natsURL,
-		Tools:   s.tools(),
-	})
-	if err != nil {
-		panic(fmt.Sprintf("extension: %v", err))
+	// Verification instances must set RUCODER_DISABLE_NATS=1: the SDK uses
+	// plain Subscribe (no queue groups), so a second replica on the same NATS
+	// would receive duplicate tool.call messages alongside the live service.
+	// To keep the tools testable, such instances expose them over HTTP at
+	// POST /api/v1/tools/{name} with a JSON args body.
+	toolBridge := false
+	if os.Getenv("RUCODER_DISABLE_NATS") != "1" {
+		ext, err := extensionsdk.Register(extensionsdk.Config{
+			ID:      "ops-extension",
+			Version: "0.1.0",
+			NATSURL: natsURL,
+			Tools:   s.tools(),
+		})
+		if err != nil {
+			panic(fmt.Sprintf("extension: %v", err))
+		}
+		s.ext = ext
+		defer ext.Close()
+	} else {
+		toolBridge = true
 	}
-	s.ext = ext
-	defer ext.Close()
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -82,13 +109,38 @@ func main() {
 		r.Get("/infra/k8s/config", s.k8sConfig)
 		r.Post("/images/build", s.buildImage)
 		r.Get("/containerfile-templates", s.containerfileTemplates)
+		if toolBridge {
+			r.Post("/tools/{name}", s.callTool)
+		}
 	})
 
 	addr := ":" + port
-	fmt.Printf("[ops-extension] listening on %s (buildkit=%s registry=%s)\n", addr, buildkitAddr, registryHost)
+	fmt.Printf("[ops-extension] listening on %s (buildkit=%s artifact=%s jj=%s)\n", addr, buildkitAddr, artifact, jj)
 	if err := http.ListenAndServe(addr, r); err != nil {
 		panic(err)
 	}
+}
+
+// callTool bridges a NATS tool over HTTP for verification instances
+// (RUCODER_DISABLE_NATS=1). Body: JSON object of tool args.
+func (s *server) callTool(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	spec, ok := s.tools()[name]
+	if !ok {
+		writeErr(w, http.StatusNotFound, "no such tool: "+name)
+		return
+	}
+	args := map[string]interface{}{}
+	if err := json.NewDecoder(r.Body).Decode(&args); err != nil && err.Error() != "EOF" {
+		writeErr(w, http.StatusBadRequest, "invalid args body: "+err.Error())
+		return
+	}
+	out, _, err := spec.Execute(r.Context(), args, "http-verify")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": out})
 }
 
 func envOr(k, d string) string {

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -23,6 +25,9 @@ func (s *server) httpGetJSON(ctx context.Context, url string) (string, error) {
 	var v interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
 		return "", err
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("GET %s: %d %s", redactURL(url), resp.StatusCode, toJSON(v))
 	}
 	return toJSON(v), nil
 }
@@ -48,6 +53,9 @@ func (s *server) httpPostJSON(ctx context.Context, url string, body interface{})
 	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
 		return "", err
 	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("POST %s: %d %s", redactURL(url), resp.StatusCode, toJSON(v))
+	}
 	return toJSON(v), nil
 }
 
@@ -72,7 +80,18 @@ func (s *server) httpPutJSON(ctx context.Context, url string, body interface{}) 
 	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
 		return "", err
 	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("PUT %s: %d %s", redactURL(url), resp.StatusCode, toJSON(v))
+	}
 	return toJSON(v), nil
+}
+
+// redactURL strips query strings from URLs before embedding them in errors.
+func redactURL(u string) string {
+	if i := strings.IndexByte(u, '?'); i >= 0 {
+		return u[:i]
+	}
+	return u
 }
 
 // selfBase returns the HTTP base of this instance for self-invoking build.

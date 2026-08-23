@@ -47,13 +47,11 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				path := strArg(args, "path")
-				res, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{
-					"command": fmt.Sprintf("cat %s", shellQuote(path)),
-				})
+				data, err := s.sandboxFileRead(ctx, cid, path)
 				if err != nil {
 					return "", nil, fmt.Errorf("sandbox read failed: %w", err)
 				}
-				return toJSON(res), nil, nil
+				return string(data), nil, nil
 			},
 		},
 		"write": {
@@ -69,10 +67,7 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				cid := strArg(args, "_container_id")
 				path := strArg(args, "path")
-				content := strArg(args, "content")
-				b64 := base64Encode(content)
-				cmd := fmt.Sprintf("mkdir -p \"$(dirname %s)\" && echo %s | base64 -d > %s", shellQuote(path), b64, shellQuote(path))
-				if _, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{"command": cmd}); err != nil {
+				if err := s.sandboxFileWrite(ctx, cid, path, []byte(strArg(args, "content"))); err != nil {
 					return "", nil, fmt.Errorf("sandbox write failed: %w", err)
 				}
 				return fmt.Sprintf("Wrote sandbox file '%s'.", path), nil, nil
@@ -168,7 +163,7 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 			},
 		},
 		"list-registry-packages": {
-			Description: "List packages and versions published to the registry.",
+			Description: "List packages and versions stored in the artifact registry (all protocols).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -177,49 +172,71 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				v, err := s.httpGetJSON(ctx, s.registry+"/api/v1/packages/list")
+				v, err := s.httpGetJSON(ctx, s.artifact+"/pkgs/system/packages")
 				return v, nil, err
 			},
 		},
 		"package-publish": {
-			Description: "Publish a built artifact to the embedded package registry.",
+			Description: "Publish the repo checkout as a package. Runs the protocol's official CLI inside a containerfile build (buildkit, no image export). Protocols: npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift. Manifest-driven protocols (npm/pypi/cargo/...) read name+version from the package manifest; go/hex/composer/maven/swift/generic need explicit name+version (+file for generic).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"protocol": map[string]interface{}{"type": "string"},
-					"image":    map[string]interface{}{"type": "string"},
-					"name":     map[string]interface{}{"type": "string"},
-					"version":  map[string]interface{}{"type": "string"},
+					"protocol":        map[string]interface{}{"type": "string"},
+					"org":             map[string]interface{}{"type": "string"},
+					"repo":            map[string]interface{}{"type": "string"},
+					"bookmark":        map[string]interface{}{"type": "string"},
+					"name":            map[string]interface{}{"type": "string"},
+					"version":         map[string]interface{}{"type": "string"},
+					"file":            map[string]interface{}{"type": "string"},
+					"dockerfile_path": map[string]interface{}{"type": "string"},
 				},
 				"required": []string{"protocol"},
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				body := map[string]interface{}{
-					"protocol": strArg(args, "protocol"),
-					"image":    strArg(args, "image"),
-					"name":     strArg(args, "name"),
-					"version":  strArg(args, "version"),
+				protocol := strArg(args, "protocol")
+				org := strArg(args, "org")
+				if org == "" {
+					org = strArg(args, "_org")
 				}
-				v, err := s.httpPostJSON(ctx, s.registry+"/api/v1/packages/publish", body)
-				return v, nil, err
+				repo := strArg(args, "repo")
+				if repo == "" {
+					repo = strArg(args, "_repo")
+				}
+				res, err := s.publishPackage(ctx, protocol, org, repo,
+					strArg(args, "bookmark"), strArg(args, "name"), strArg(args, "version"),
+					strArg(args, "file"), strArg(args, "dockerfile_path"))
+				return res, nil, err
 			},
 		},
 		"pull-git-repo": {
-			Description: "Pull a git repository from a remote URL into local storage.",
+			Description: "Clone a remote git repository into jj-server local storage (org 'external').",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"git_url": map[string]interface{}{"type": "string"},
-					"branch":  map[string]interface{}{"type": "string"},
+					"org":     map[string]interface{}{"type": "string"},
 				},
 				"required": []string{"git_url"},
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				body := map[string]interface{}{
-					"git_url": strArg(args, "git_url"),
-					"branch":  strArg(args, "branch"),
+				gitURL := strArg(args, "git_url")
+				if gitURL == "" {
+					return "", nil, fmt.Errorf("pull-git-repo: missing 'git_url'")
 				}
-				v, err := s.httpPostJSON(ctx, s.registry+"/api/v1/packages/pull-git", body)
+				repo := inferRepoFromGitURL(gitURL)
+				if repo == "" {
+					return "", nil, fmt.Errorf("cannot infer repo name from %s", gitURL)
+				}
+				org := strArg(args, "org")
+				if org == "" {
+					org = "external"
+				}
+				body := map[string]interface{}{
+					"org":     org,
+					"repo":    repo,
+					"git_url": gitURL,
+				}
+				v, err := s.httpPostJSON(ctx, s.jj+"/api/v1/repos/clone", body)
 				return v, nil, err
 			},
 		},
@@ -359,15 +376,15 @@ func jsonMarshalIndent(v interface{}) ([]byte, error) {
 // trimUnused keeps imports valid; remove if linters complain.
 var _ = strings.TrimSpace
 
-// sandboxEdit implements edit as read-modify-write over the worker sandbox.
+// sandboxEdit implements edit as read-modify-write over the worker sandbox
+// using the native file_read/file_write RPCs (the minimal worker shell has no
+// pipes/redirection).
 func (s *server) sandboxEdit(ctx context.Context, cid, path string, startLine, endLine int64, content string) (string, error) {
-	read, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{
-		"command": fmt.Sprintf("cat %s", shellQuote(path)),
-	})
+	data, err := s.sandboxFileRead(ctx, cid, path)
 	if err != nil {
 		return "", fmt.Errorf("sandbox edit read failed: %w", err)
 	}
-	current := strVal(rawMap(read))
+	current := string(data)
 	lines := strings.Split(current, "\n")
 	var newLines []string
 	if content != "" {
@@ -398,9 +415,7 @@ func (s *server) sandboxEdit(ctx context.Context, cid, path string, startLine, e
 		lines = v
 	}
 	newContent := strings.Join(lines, "\n")
-	b64 := base64Encode(newContent)
-	cmd := fmt.Sprintf("mkdir -p \"$(dirname %s)\" && echo %s | base64 -d > %s", shellQuote(path), b64, shellQuote(path))
-	if _, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{"command": cmd}); err != nil {
+	if err := s.sandboxFileWrite(ctx, cid, path, []byte(newContent)); err != nil {
 		return "", fmt.Errorf("sandbox edit write failed: %w", err)
 	}
 	return fmt.Sprintf("Edited sandbox file '%s'.", path), nil
@@ -439,14 +454,12 @@ func (s *server) portFile(ctx context.Context, args map[string]interface{}) (str
 		message = "port " + sandboxPath
 	}
 
-	// 1. Read from sandbox (worker).
-	read, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{
-		"command": fmt.Sprintf("cat %s", shellQuote(sandboxPath)),
-	})
+	// 1. Read from sandbox (worker) via native file_read.
+	data, err := s.sandboxFileRead(ctx, cid, sandboxPath)
 	if err != nil {
 		return "", fmt.Errorf("port sandbox read failed: %w", err)
 	}
-	content := strVal(rawMap(read))
+	content := string(data)
 
 	// 2. Write to jj-server via Contents API (base64).
 	org := strArg(args, "_org")
@@ -456,7 +469,7 @@ func (s *server) portFile(ctx context.Context, args map[string]interface{}) (str
 		branch = "main"
 	}
 	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/%s/contents/%s",
-		s.builder, urlPathEscape(org), urlPathEscape(repo), urlPathEscape(branch), escapePath(repoPath))
+		s.jj, urlPathEscape(org), urlPathEscape(repo), urlPathEscape(branch), escapePath(repoPath))
 	body := map[string]interface{}{
 		"content": base64Encode(content),
 		"message": message,
@@ -467,9 +480,8 @@ func (s *server) portFile(ctx context.Context, args map[string]interface{}) (str
 	return fmt.Sprintf("Ported '%s' to repo '%s'.", sandboxPath, repoPath), nil
 }
 
-// imageList queries the OCI registry catalog (GET /v2/_catalog) and returns the
-// repository names. registryHost is the OCI store (e.g. rucoder-zot...).
+// imageList queries the artifact registry's OCI catalog (GET /v2/_catalog)
+// and returns the repository names.
 func (s *server) imageList(ctx context.Context) (string, error) {
-	url := fmt.Sprintf("https://%s/v2/_catalog", s.registryHost)
-	return s.httpGetJSON(ctx, url)
+	return s.httpGetJSON(ctx, s.artifact+"/v2/_catalog")
 }

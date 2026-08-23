@@ -196,14 +196,12 @@ func (s *server) sandboxRead(w http.ResponseWriter, r *http.Request) {
 		Path        string `json:"path"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
-	res, err := s.workerCommand(r.Context(), b.ContainerID, "execute", map[string]interface{}{
-		"command": fmt.Sprintf("cat %s", shellQuote(b.Path)),
-	})
+	data, err := s.sandboxFileRead(r.Context(), b.ContainerID, b.Path)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "content": res})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "content": string(data)})
 }
 
 func (s *server) sandboxWrite(w http.ResponseWriter, r *http.Request) {
@@ -213,15 +211,11 @@ func (s *server) sandboxWrite(w http.ResponseWriter, r *http.Request) {
 		Content     string `json:"content"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
-	b64 := base64Encode(b.Content)
-	res, err := s.workerCommand(r.Context(), b.ContainerID, "execute", map[string]interface{}{
-		"command": fmt.Sprintf("mkdir -p \"$(dirname %s)\" && echo %s | base64 -d > %s", shellQuote(b.Path), b64, shellQuote(b.Path)),
-	})
-	if err != nil {
+	if err := s.sandboxFileWrite(r.Context(), b.ContainerID, b.Path, []byte(b.Content)); err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": res})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "path": b.Path})
 }
 
 func (s *server) deploy(w http.ResponseWriter, r *http.Request) {

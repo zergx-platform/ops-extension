@@ -3,11 +3,13 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -34,6 +36,38 @@ type buildBody struct {
 	Push       bool   `json:"push"`
 }
 
+// fetchRepoArchive downloads the tar.gz of org/repo@rev from jj-server into a
+// fresh temp dir and returns its path (caller must RemoveAll it). The archive
+// has a single top-level "{repo}-{rev}" directory which is stripped, so build
+// contexts have the repo files at the root.
+func (s *server) fetchRepoArchive(ctx context.Context, org, repo, rev string) (string, error) {
+	archiveURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/%s/archive",
+		s.jj, urlPathEscape(org), urlPathEscape(repo), urlPathEscape(rev))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("fetch context: %d", resp.StatusCode)
+	}
+
+	tmpDir := filepath.Join(os.TempDir(), "ops-build-"+uuid.NewString())
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return "", err
+	}
+	if err := extractTarGz(resp.Body, tmpDir, 1); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("untar: %w", err)
+	}
+	return tmpDir, nil
+}
+
 func (s *server) buildImage(w http.ResponseWriter, r *http.Request) {
 	var b buildBody
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
@@ -48,47 +82,22 @@ func (s *server) buildImage(w http.ResponseWriter, r *http.Request) {
 		b.Tag = "latest"
 	}
 
-	// 1. Fetch the workspace tar from repo-manager.
-	archiveURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/%s/archive",
-		s.builder, b.Org, b.Repo, b.Bookmark)
-
-	ctx := r.Context()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
+	// 1. Fetch the workspace tar from jj-server (top dir stripped).
+	tmpDir, err := s.fetchRepoArchive(r.Context(), b.Org, b.Repo, b.Bookmark)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, fmt.Sprintf("fetch context: %v", err))
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		writeErr(w, http.StatusBadGateway, fmt.Sprintf("fetch context: %d", resp.StatusCode))
-		return
-	}
-
-	// 2. Expand the tar into a temp dir.
-	tmpDir := filepath.Join(os.TempDir(), "ops-build-"+uuid.NewString())
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	defer os.RemoveAll(tmpDir)
-	if err := extractTarGz(resp.Body, tmpDir); err != nil {
-		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("untar: %v", err))
-		return
-	}
 
-	// 3. Full registry-qualified tag (against the OCI registry host).
-	fullTag := fmt.Sprintf("%s/%s:%s", s.registryHost, b.Tag, b.Bookmark)
+	// 2. Full registry-qualified tag (via the TLS ingress host buildkit can push to).
+	fullTag := fmt.Sprintf("%s/%s:%s", s.artifactImageHost, b.Tag, b.Bookmark)
 	if b.Dockerfile == "" {
 		b.Dockerfile = "Dockerfile"
 	}
 
-	// 4. Build + push via moby/buildkit.
-	imageID, err := s.buildkit.Build(ctx, tmpDir, b.Dockerfile, fullTag)
+	// 3. Build + push via moby/buildkit.
+	imageID, err := s.buildkit.Build(r.Context(), tmpDir, b.Dockerfile, fullTag)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("build failed: %v", err))
 		return
@@ -103,7 +112,9 @@ func (s *server) buildImage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func extractTarGz(r interface{ Read([]byte) (int, error) }, dest string) error {
+// extractTarGz expands a tar.gz stream into dest, optionally stripping the
+// first `strip` path components from every entry (like tar --strip-components).
+func extractTarGz(r interface{ Read([]byte) (int, error) }, dest string, strip int) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return err
@@ -118,7 +129,17 @@ func extractTarGz(r interface{ Read([]byte) (int, error) }, dest string) error {
 			}
 			return err
 		}
-		target := filepath.Join(dest, hdr.Name)
+		name := hdr.Name
+		// Normalize: tar paths may carry "./" prefixes.
+		name = strings.TrimPrefix(name, "./")
+		parts := strings.Split(name, "/")
+		if strip > 0 {
+			if len(parts) <= strip {
+				continue // the stripped top-level entry itself
+			}
+			parts = parts[strip:]
+		}
+		target := filepath.Join(append([]string{dest}, parts...)...)
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o755); err != nil {
