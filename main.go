@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 
 	extensionsdk "forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go"
 	"github.com/go-chi/chi/v5"
@@ -24,6 +25,15 @@ type server struct {
 	artifactImageHost string // TLS ingress host for image refs (FROM/push via buildkit)
 	artifactToken     string // optional bearer/basic token for artifact write auth
 	jj                string // jj-server URL (repo archive + contents + clone)
+
+	wsMu    sync.Mutex              // guards wsCache
+	wsCache map[string]wsCacheEntry // session -> workspace (short TTL)
+
+	syncMu sync.Mutex        // guards synced
+	synced map[string]string // container key -> synced rev
+
+	// workerResolver overrides worker URL resolution (tests).
+	workerResolver func(cid string) (string, error)
 }
 
 func main() {
@@ -66,6 +76,8 @@ func main() {
 		artifactImageHost: artifactImageHost,
 		artifactToken:     artifactToken,
 		jj:                jj,
+		wsCache:           map[string]wsCacheEntry{},
+		synced:            map[string]string{},
 	}
 
 	// Verification instances must set RUCODER_DISABLE_NATS=1: the SDK uses
@@ -94,25 +106,39 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", s.health)
-		r.Get("/containers", s.listContainers)
-		r.Post("/containers", s.createContainer)
-		r.Delete("/containers/{cid}", s.deleteContainer)
-		r.Post("/containers/{cid}/exec", s.exec)
-		r.Get("/containers/{cid}/jobs", s.listJobs)
-		r.Get("/containers/{cid}/jobs/{jobID}/output", s.jobOutput)
-		r.Post("/containers/{cid}/jobs/{jobID}/wait", s.jobWait)
-		r.Post("/containers/{cid}/jobs/{jobID}/stdin", s.jobStdin)
-		r.Post("/containers/{cid}/kill/{jobID}", s.kill)
-		r.Post("/sandbox/read", s.sandboxRead)
-		r.Post("/sandbox/write", s.sandboxWrite)
-		r.Post("/deploy", s.deploy)
+		r.Get("/sandboxes", s.sandboxesList)
+		r.Get("/sandboxes/{session}", s.sandboxGet)
+		r.Delete("/sandboxes/{session}", s.deleteContainer)
+		r.Post("/sandboxes/{session}/exec", s.exec)
+		r.Get("/sandboxes/{session}/jobs", s.listJobs)
+		r.Get("/sandboxes/{session}/jobs/{jobID}/output", s.jobOutput)
+		r.Post("/sandboxes/{session}/jobs/{jobID}/wait", s.jobWait)
+		r.Post("/sandboxes/{session}/jobs/{jobID}/stdin", s.jobStdin)
+		r.Post("/sandboxes/{session}/jobs/{jobID}/kill", s.kill)
+		r.Post("/sandboxes/{session}/read", s.sandboxRead)
+		r.Post("/sandboxes/{session}/write", s.sandboxWrite)
+		r.Get("/sandboxes/{session}/ws", s.wsProxy)
+		r.Get("/sandboxes/{session}/ws/job", s.wsProxyJob)
+		r.Post("/deployments", s.deploy)
 		r.Get("/infra/k8s/config", s.k8sConfig)
 		r.Post("/images/build", s.buildImage)
 		r.Get("/containerfile-templates", s.containerfileTemplates)
+		r.Get("/status", s.status)
+		r.Get("/deployments", s.deploymentsList)
+		r.Get("/deployments/{name}/pods", s.deploymentPods)
+		r.Get("/deployments/{name}/status", s.deploymentStatus)
+		r.Delete("/deployments/{name}", s.deploymentDelete)
+		r.Get("/packages", s.packagesList)
+		r.Get("/images", s.imagesList)
+		r.Get("/publish-specs", s.publishSpecsHandler)
+		r.Post("/packages/publish", s.packagesPublish)
 		if toolBridge {
 			r.Post("/tools/{name}", s.callTool)
 		}
 	})
+
+	// Embedded SPA (served at /; /api/v1 routes registered above win).
+	r.Handle("/*", spaHandler())
 
 	addr := ":" + port
 	fmt.Printf("[ops-extension] listening on %s (buildkit=%s artifact=%s jj=%s)\n", addr, buildkitAddr, artifact, jj)

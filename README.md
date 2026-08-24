@@ -3,7 +3,23 @@
 Go single-binary extension server replacing the original Rust `executor` +
 `sandbox-tools` + `builder` + `artifact-tools` services. No external binaries
 (`kubectl`/`buildctl`) — it uses `client-go`, `moby/buildkit`, and
-`gorilla/websocket` directly.
+`gorilla/websocket` directly. Embeds an admin SPA (Svelte 5 + Tailwind 4,
+shared rucoder dark theme) served at `/`.
+
+## Architecture
+
+- **Session-scoped sandboxes**: the agent injects `_session`
+  (`org:repo:bookmark`) into every tool call; ops-extension resolves the
+  workspace against **jj-server only**, lazily creates/reuses the session's
+  worker pod (k8s label `rucoder/container=<key>`), and syncs the repo tree
+  into it before execution.
+- **Overlay sync**: only the worker's `sync/files` endpoint is used — repo
+  files are refreshed to the bookmark head; files that exist only in the
+  sandbox are never deleted. `sandbox-run` passes `rev` so the worker rejects
+  execution on drift (`need_sync`), which triggers an automatic re-push.
+- **Containerfile publish**: publishing runs each protocol's official CLI
+  inside a buildkit build (no image export); base images resolve through
+  buildkitd's proxy, uploads go to the artifact registry.
 
 ## Capabilities
 
@@ -35,16 +51,36 @@ go build ./...
 Executor: `/containers` (+ `/{cid}`, `/{cid}/exec`, `/{cid}/jobs*`, `/{cid}/kill/{job_id}`),
 `/sandbox/read`, `/sandbox/write`, `/deploy`, `/infra/k8s/config`.
 
-Builder: `/images/build`, `/containerfile-templates`.
+Builder: `/images/build`, `/containerfile-templates`, `/images`.
 
-## NATS tools
+Admin/UI: `/status`, `/sessions`, `/packages`, `/publish-specs`,
+`POST /packages/publish` — plus the embedded SPA at `/`.
 
-**Phase 1 (sandbox)** — `bash`, `read`, `write`, `edit`, `job_list`, `job_output`,
-`job_wait`, `job_stdin`, `job_kill`, `port`.
+## Frontend
 
-**Phase 2 (artifact)** — `list-registry-packages`, `package-publish`,
-`pull-git-repo`, `container-build`, `container-deploy`, `image-list`,
+`frontend/` — Svelte 5 (runes) + Vite + Tailwind 4 + bits-ui + lucide,
+zod-validated API client (schemas are the single source of truth for types).
+Same shared rucoder dark theme as jj-server/artifact. Build with
+`make frontend` (pnpm), embedded via `go:embed` — pages: Overview / Sessions /
+Sandbox console / Builds / Packages / Tools.
+
+## NATS tools (17)
+
+**Sandbox (session-scoped, auto-synced)** — `sandbox-run`, `sandbox-read`,
+`sandbox-write`, `sandbox-edit`, `sandbox-port`.
+
+**Sandbox jobs** — `sandbox-job-list`, `sandbox-job-output`,
+`sandbox-job-wait`, `sandbox-job-stdin`, `sandbox-job-kill`.
+
+**Images** — `container-build`, `container-deploy`, `image-list`,
 `list-containerfile-templates`.
+
+**Packages** — `package-publish` (14 protocols), `list-registry-packages`.
+
+**Repos** — `pull-git-repo`.
+
+All sandbox tools resolve the workspace from `_session` (or legacy
+`_org/_repo/_branch` args for debugging).
 
 ### package-publish (containerfile-based)
 

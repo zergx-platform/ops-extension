@@ -1,4 +1,12 @@
-# Build both the SDK and ops-extension from a shared parent context.
+# Build the frontend and the Go binary from a shared parent context.
+# Parent context must contain: extension-sdk-go/ and ops-extension/.
+FROM node:22-alpine AS frontend
+WORKDIR /fe
+COPY ops-extension/frontend/package.json ops-extension/frontend/pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile || pnpm install
+COPY ops-extension/frontend/ ./
+RUN pnpm build
+
 FROM golang:1.26-alpine AS build
 ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
@@ -14,8 +22,9 @@ RUN apk add --no-cache git \
 WORKDIR /src
 COPY extension-sdk-go ./extension-sdk-go
 COPY ops-extension ./ops-extension
+COPY --from=frontend /fe/dist /src/ops-extension/frontend/dist
 WORKDIR /src/ops-extension
-RUN CGO_ENABLED=0 go build -o /out/ops-extension .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/ops-extension .
 
 FROM scratch
 COPY --from=build /out/ops-extension /ops-extension

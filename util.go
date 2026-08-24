@@ -13,6 +13,20 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// strVal extracts a string field from a worker RPC reply.
+func strVal(v map[string]interface{}) string {
+	if s, ok := v["content"].(string); ok {
+		return s
+	}
+	if s, ok := v["output"].(string); ok {
+		return s
+	}
+	if s, ok := v["result"].(string); ok {
+		return s
+	}
+	return ""
+}
+
 // param extracts a URL param from a chi-routed request.
 func param(r *http.Request, key string) string {
 	return chi.URLParam(r, key)

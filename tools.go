@@ -8,12 +8,15 @@ import (
 	extensionsdk "forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go"
 )
 
-// tools returns the phase-1 NATS tools (sandbox + container). These mirror the
-// original sandbox-tools surface (kebab/snake naming preserved).
+// tools returns the NATS tool set. Sandbox tools are session-scoped: the
+// agent injects `_session` ("org:repo:bookmark"); ops-extension resolves the
+// workspace via jj-server, lazily creates/reuses the session's worker pod,
+// and syncs the repo tree into it (overlay-only, sandbox-only files are
+// never deleted) before running.
 func (s *server) tools() map[string]extensionsdk.ToolSpec {
 	return map[string]extensionsdk.ToolSpec{
-		"bash": {
-			Description: "Run a command in the sandbox (worker) using a minimal shell.",
+		"sandbox-run": {
+			Description: "Run a shell command in the session sandbox. The workspace is synced to the repo bookmark head first (repo files refreshed; sandbox-only files kept).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -23,20 +26,54 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				"required": []string{"command"},
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				cid := strArg(args, "_container_id")
 				command := strArg(args, "command")
 				if command == "" {
-					return "", nil, fmt.Errorf("bash: missing 'command'")
+					return "", nil, fmt.Errorf("sandbox-run: missing 'command'")
 				}
-				res, err := s.workerCommand(ctx, cid, "execute", map[string]interface{}{"command": command})
+				sc, err := s.ensureSandbox(ctx, args, true)
 				if err != nil {
-					return "", nil, fmt.Errorf("bash failed: %w", err)
+					return "", nil, err
+				}
+				res, err := s.workerCommand(ctx, sc.cid, "execute", map[string]interface{}{
+					"command": command,
+					"rev":     sc.ws.rev,
+				})
+				if err != nil {
+					return "", nil, fmt.Errorf("sandbox-run failed: %w", err)
+				}
+				// Worker may have restarted (synced_rev lost) or, in worker
+				// builds where the HTTP and WS rev trackers are separate
+				// states, never observe the pushed rev: re-sync once and
+				// retry; if the worker still refuses while we know we pushed
+				// this exact rev, execute without the rev gate (content is
+				// verified synced on our side).
+				if m := rawMap(res); m["need_sync"] == true {
+					s.markUnsynced(sc.cid)
+					if err := s.ensureSynced(ctx, sc.cid, sc.ws); err != nil {
+						return "", nil, err
+					}
+					res, err = s.workerCommand(ctx, sc.cid, "execute", map[string]interface{}{
+						"command": command,
+						"rev":     sc.ws.rev,
+					})
+					if err != nil {
+						return "", nil, fmt.Errorf("sandbox-run failed: %w", err)
+					}
+					if m := rawMap(res); m["need_sync"] == true {
+						fmt.Printf("[ops-extension] worker %s still need_sync after push of %s; executing without rev gate\n", sc.cid, sc.ws.rev)
+						res, err = s.workerCommand(ctx, sc.cid, "execute", map[string]interface{}{
+							"command": command,
+						})
+						if err != nil {
+							return "", nil, fmt.Errorf("sandbox-run failed: %w", err)
+						}
+					}
 				}
 				return toJSON(res), nil, nil
 			},
 		},
-		"read": {
-			Description: "Read a file from the sandbox (worker) filesystem.",
+		"sandbox-read": {
+			Description: "Read a file from the session sandbox filesystem (synced to repo first).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -45,17 +82,20 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				"required": []string{"path"},
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				cid := strArg(args, "_container_id")
 				path := strArg(args, "path")
-				data, err := s.sandboxFileRead(ctx, cid, path)
+				sc, err := s.ensureSandbox(ctx, args, true)
 				if err != nil {
-					return "", nil, fmt.Errorf("sandbox read failed: %w", err)
+					return "", nil, err
+				}
+				data, err := s.sandboxFileRead(ctx, sc.cid, path)
+				if err != nil {
+					return "", nil, fmt.Errorf("sandbox-read failed: %w", err)
 				}
 				return string(data), nil, nil
 			},
 		},
-		"write": {
-			Description: "Write a file into the sandbox (worker) filesystem.",
+		"sandbox-write": {
+			Description: "Write a file into the session sandbox filesystem (no sync first — never clobbers in-progress edits).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -65,84 +105,108 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				"required": []string{"path", "content"},
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				cid := strArg(args, "_container_id")
 				path := strArg(args, "path")
-				if err := s.sandboxFileWrite(ctx, cid, path, []byte(strArg(args, "content"))); err != nil {
-					return "", nil, fmt.Errorf("sandbox write failed: %w", err)
+				sc, err := s.ensureSandbox(ctx, args, false)
+				if err != nil {
+					return "", nil, err
+				}
+				if err := s.sandboxFileWrite(ctx, sc.cid, path, []byte(strArg(args, "content"))); err != nil {
+					return "", nil, fmt.Errorf("sandbox-write failed: %w", err)
 				}
 				return fmt.Sprintf("Wrote sandbox file '%s'.", path), nil, nil
 			},
 		},
-		"job_list": {
-			Description: "List background jobs in the sandbox.",
+		"sandbox-edit": {
+			Description: "Replace or insert lines in a sandbox file by line numbers (synced to repo first).",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"start_line": map[string]interface{}{"type": "integer"},
+					"end_line":   map[string]interface{}{"type": "integer"},
+					"path":       map[string]interface{}{"type": "string"},
+					"content":    map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"path", "start_line", "end_line"},
+			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				cid := strArg(args, "_container_id")
-				res, err := s.workerCommand(ctx, cid, "jobs", map[string]interface{}{})
+				path := strArg(args, "path")
+				startLine := intArg64(args, "start_line", 0)
+				endLine := intArg64(args, "end_line", 0)
+				content := strArg(args, "content")
+				sc, err := s.ensureSandbox(ctx, args, true)
 				if err != nil {
-					return "", nil, fmt.Errorf("job_list failed: %w", err)
+					return "", nil, err
+				}
+				v, err := s.sandboxEdit(ctx, sc.cid, path, startLine, endLine, content)
+				return v, nil, err
+			},
+		},
+		"sandbox-job-list": {
+			Description: "List jobs (commands) in the session sandbox.",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				sc, err := s.ensureSandbox(ctx, args, false)
+				if err != nil {
+					return "", nil, err
+				}
+				res, err := s.workerCommand(ctx, sc.cid, "jobs", map[string]interface{}{})
+				if err != nil {
+					return "", nil, fmt.Errorf("sandbox-job-list failed: %w", err)
 				}
 				return toJSON(res), nil, nil
 			},
 		},
-		"job_output": {
-			Description: "Read the output of a background job.",
+		"sandbox-job-output": {
+			Description: "Read output of a sandbox job (supports offset/limit/grep).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"job_id": map[string]interface{}{"type": "string"},
+					"start":  map[string]interface{}{"type": "integer"},
+					"end":    map[string]interface{}{"type": "integer"},
+					"grep":   map[string]interface{}{"type": "string"},
 				},
 				"required": []string{"job_id"},
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				cid := strArg(args, "_container_id")
-				jobID := strArg(args, "job_id")
-				res, err := s.workerCommand(ctx, cid, "job_output", map[string]interface{}{"job_id": jobID})
+				sc, err := s.ensureSandbox(ctx, args, false)
 				if err != nil {
-					return "", nil, fmt.Errorf("job_output failed: %w", err)
+					return "", nil, err
+				}
+				res, err := s.workerCommand(ctx, sc.cid, "job_output", jobArgs(args))
+				if err != nil {
+					return "", nil, fmt.Errorf("sandbox-job-output failed: %w", err)
 				}
 				return toJSON(res), nil, nil
 			},
 		},
-		"job_kill": {
-			Description: "Kill a background job.",
+		"sandbox-job-wait": {
+			Description: "Wait for a sandbox job to finish.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"job_id": map[string]interface{}{"type": "string"},
+					"job_id":     map[string]interface{}{"type": "string"},
+					"timeout_ms": map[string]interface{}{"type": "integer"},
 				},
 				"required": []string{"job_id"},
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				cid := strArg(args, "_container_id")
-				jobID := strArg(args, "job_id")
-				res, err := s.workerCommand(ctx, cid, "kill", map[string]interface{}{"job_id": jobID})
+				sc, err := s.ensureSandbox(ctx, args, false)
 				if err != nil {
-					return "", nil, fmt.Errorf("job_kill failed: %w", err)
+					return "", nil, err
+				}
+				res, err := s.workerCommand(ctx, sc.cid, "job_wait", jobArgs(args))
+				if err != nil {
+					return "", nil, fmt.Errorf("sandbox-job-wait failed: %w", err)
 				}
 				return toJSON(res), nil, nil
 			},
 		},
-		"job_wait": {
-			Description: "Wait for a background job to finish.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"job_id": map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"job_id"},
-			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				cid := strArg(args, "_container_id")
-				jobID := strArg(args, "job_id")
-				res, err := s.workerCommand(ctx, cid, "job_wait", map[string]interface{}{"job_id": jobID, "timeout_ms": 30000})
-				if err != nil {
-					return "", nil, fmt.Errorf("job_wait failed: %w", err)
-				}
-				return toJSON(res), nil, nil
-			},
-		},
-		"job_stdin": {
-			Description: "Send input to the stdin of a running background job.",
+		"sandbox-job-stdin": {
+			Description: "Send stdin data to a running sandbox job.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -152,27 +216,142 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				"required": []string{"job_id", "data"},
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				cid := strArg(args, "_container_id")
-				jobID := strArg(args, "job_id")
-				data := strArg(args, "data")
-				res, err := s.workerCommand(ctx, cid, "job_stdin", map[string]interface{}{"job_id": jobID, "data": data})
+				sc, err := s.ensureSandbox(ctx, args, false)
 				if err != nil {
-					return "", nil, fmt.Errorf("job_stdin failed: %w", err)
+					return "", nil, err
+				}
+				res, err := s.workerCommand(ctx, sc.cid, "job_stdin", map[string]interface{}{
+					"job_id": strArg(args, "job_id"),
+					"data":   strArg(args, "data"),
+				})
+				if err != nil {
+					return "", nil, fmt.Errorf("sandbox-job-stdin failed: %w", err)
 				}
 				return toJSON(res), nil, nil
 			},
 		},
-		"list-registry-packages": {
-			Description: "List packages and versions stored in the artifact registry (all protocols).",
+		"sandbox-job-kill": {
+			Description: "Kill a sandbox job.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"protocol": map[string]interface{}{"type": "string"},
-					"name":     map[string]interface{}{"type": "string"},
+					"job_id": map[string]interface{}{"type": "string"},
 				},
+				"required": []string{"job_id"},
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				v, err := s.httpGetJSON(ctx, s.artifact+"/pkgs/system/packages")
+				sc, err := s.ensureSandbox(ctx, args, false)
+				if err != nil {
+					return "", nil, err
+				}
+				res, err := s.workerCommand(ctx, sc.cid, "kill", map[string]interface{}{
+					"job_id": strArg(args, "job_id"),
+				})
+				if err != nil {
+					return "", nil, fmt.Errorf("sandbox-job-kill failed: %w", err)
+				}
+				return toJSON(res), nil, nil
+			},
+		},
+		"sandbox-port": {
+			Description: "Copy a file from the sandbox into the session's repo (bookmark moves; the change syncs back on the next sandbox tool call).",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"sandbox_path": map[string]interface{}{"type": "string"},
+					"repo_path":    map[string]interface{}{"type": "string"},
+					"message":      map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"sandbox_path", "repo_path"},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				sc, err := s.ensureSandbox(ctx, args, false)
+				if err != nil {
+					return "", nil, err
+				}
+				v, err := s.portFile(ctx, sc, args)
+				if err == nil {
+					// The bookmark moved: forget the cached head so the next
+					// call re-syncs and observes the ported file.
+					s.invalidateWorkspace(sc.session)
+				}
+				return v, nil, err
+			},
+		},
+		"container-build": {
+			Description: "Build a container image from a Containerfile in the repo using the remote buildkit builder.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"dockerfile_path": map[string]interface{}{"type": "string"},
+					"tag":             map[string]interface{}{"type": "string"},
+					"context":         map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"dockerfile_path", "tag"},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				ws, _, err := s.resolveWorkspace(ctx, args)
+				if err != nil {
+					return "", nil, err
+				}
+				payload := map[string]interface{}{
+					"org":        ws.org,
+					"repo":       ws.repo,
+					"bookmark":   ws.bookmark,
+					"dockerfile": strArg(args, "dockerfile_path"),
+					"tag":        strArg(args, "tag"),
+					"context":    strArg(args, "context"),
+					"push":       true,
+				}
+				res, err := s.httpPostJSON(ctx, selfBase()+"/api/v1/images/build", payload)
+				if err != nil {
+					return "", nil, fmt.Errorf("container-build failed: %w", err)
+				}
+				return res, nil, nil
+			},
+		},
+		"container-deploy": {
+			Description: "Deploy a container image as a Kubernetes deployment.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"image": map[string]interface{}{"type": "string"},
+					"name":  map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"image"},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				image := strArg(args, "image")
+				name := strArg(args, "name")
+				if name == "" {
+					name = "app"
+				}
+				// Deployments belong to the calling session (if one is given),
+				// so GET /sandboxes/{session} can list them.
+				session := ""
+				if sid := strArg(args, "_session"); sid != "" {
+					session = sid
+				} else if org := strArg(args, "org"); org != "" {
+					bm := strArg(args, "bookmark")
+					if bm == "" {
+						bm = "main"
+					}
+					session = org + ":" + strArg(args, "repo") + ":" + bm
+				}
+				if err := s.k8s.EnsureDeployment(ctx, name, image, 1, 8080, nil, session); err != nil {
+					return "", nil, fmt.Errorf("container-deploy failed: %w", err)
+				}
+				return fmt.Sprintf("Deployed '%s' from %s.", name, image), nil, nil
+			},
+		},
+		"image-list": {
+			Description: "List container images in the OCI registry.",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				v, err := s.imageList(ctx)
 				return v, nil, err
 			},
 		},
@@ -194,18 +373,44 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
 				protocol := strArg(args, "protocol")
-				org := strArg(args, "org")
-				if org == "" {
-					org = strArg(args, "_org")
+				// Explicit org/repo win; else resolve the session workspace.
+				org, repo, bookmark := strArg(args, "org"), strArg(args, "repo"), strArg(args, "bookmark")
+				if org == "" || repo == "" {
+					ws, _, err := s.resolveWorkspace(ctx, args)
+					if err != nil {
+						return "", nil, err
+					}
+					if org == "" {
+						org, repo = ws.org, ws.repo
+					}
+					if bookmark == "" {
+						bookmark = ws.bookmark
+					}
 				}
-				repo := strArg(args, "repo")
-				if repo == "" {
-					repo = strArg(args, "_repo")
-				}
-				res, err := s.publishPackage(ctx, protocol, org, repo,
-					strArg(args, "bookmark"), strArg(args, "name"), strArg(args, "version"),
+				res, err := s.publishPackage(ctx, protocol, org, repo, bookmark,
+					strArg(args, "name"), strArg(args, "version"),
 					strArg(args, "file"), strArg(args, "dockerfile_path"))
 				return res, nil, err
+			},
+		},
+		"list-registry-packages": {
+			Description: "List packages and versions stored in the artifact registry (all protocols).",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"protocol": map[string]interface{}{"type": "string"},
+					"name":     map[string]interface{}{"type": "string"},
+				},
+			},
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				v, err := s.httpGetJSON(ctx, s.artifact+"/pkgs/system/packages")
+				return v, nil, err
+			},
+		},
+		"list-containerfile-templates": {
+			Description: "List built-in Containerfile/build templates.",
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
+				return toJSON(builtinTemplates()), nil, nil
 			},
 		},
 		"pull-git-repo": {
@@ -240,113 +445,29 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				return v, nil, err
 			},
 		},
-		"container-build": {
-			Description: "Build a container image from a Containerfile in the repo using the remote buildkit builder.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"dockerfile_path": map[string]interface{}{"type": "string"},
-					"tag":             map[string]interface{}{"type": "string"},
-					"context":         map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"dockerfile_path", "tag"},
-			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				payload := map[string]interface{}{
-					"org":        strArg(args, "_org"),
-					"repo":       strArg(args, "_repo"),
-					"bookmark":   strArg(args, "_branch"),
-					"dockerfile": strArg(args, "dockerfile_path"),
-					"tag":        strArg(args, "tag"),
-					"context":    strArg(args, "context"),
-					"push":       true,
-				}
-				res, err := s.httpPostJSON(ctx, selfBase()+"/api/v1/images/build", payload)
-				if err != nil {
-					return "", nil, fmt.Errorf("container-build failed: %w", err)
-				}
-				return res, nil, nil
-			},
-		},
-		"list-containerfile-templates": {
-			Description: "List built-in Containerfile/build templates.",
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				return toJSON(builtinTemplates()), nil, nil
-			},
-		},
-		"edit": {
-			Description: "Replace or insert lines in a sandbox file by line numbers.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"start_line": map[string]interface{}{"type": "integer"},
-					"end_line":   map[string]interface{}{"type": "integer"},
-					"path":       map[string]interface{}{"type": "string"},
-					"content":    map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"path", "start_line", "end_line"},
-			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				cid := strArg(args, "_container_id")
-				path := strArg(args, "path")
-				startLine := intArg64(args, "start_line", 0)
-				endLine := intArg64(args, "end_line", 0)
-				content := strArg(args, "content")
-				v, err := s.sandboxEdit(ctx, cid, path, startLine, endLine, content)
-				return v, nil, err
-			},
-		},
-		"container-deploy": {
-			Description: "Deploy a container image as a Kubernetes deployment.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"image": map[string]interface{}{"type": "string"},
-					"name":  map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"image"},
-			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				image := strArg(args, "image")
-				name := strArg(args, "name")
-				if name == "" {
-					name = "app"
-				}
-				if err := s.k8s.EnsureDeployment(ctx, name, image, 1, 8080, nil); err != nil {
-					return "", nil, fmt.Errorf("container-deploy failed: %w", err)
-				}
-				return fmt.Sprintf("Deployed '%s' from %s.", name, image), nil, nil
-			},
-		},
-		"port": {
-			Description: "Copy a file from the sandbox into the repo (sandbox -> jj repo).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"sandbox_path": map[string]interface{}{"type": "string"},
-					"repo_path":    map[string]interface{}{"type": "string"},
-					"message":      map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"sandbox_path", "repo_path"},
-			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				v, err := s.portFile(ctx, args)
-				return v, nil, err
-			},
-		},
-		"image-list": {
-			Description: "List container images in the OCI registry.",
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string) (string, map[string]interface{}, error) {
-				v, err := s.imageList(ctx)
-				return v, nil, err
-			},
-		},
 	}
 }
+
+// jobArgs lifts the shared job params (id + output window) for job RPCs.
+func jobArgs(args map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{
+		"job_id": strArg(args, "job_id"),
+	}
+	if v := args["start"]; v != nil {
+		out["start"] = v
+	}
+	if v := args["end"]; v != nil {
+		out["end"] = v
+	}
+	if g := strArg(args, "grep"); g != "" {
+		out["grep"] = g
+	}
+	if v := args["timeout_ms"]; v != nil {
+		out["timeout_ms"] = v
+	}
+	return out
+}
+
 func strArg(args map[string]interface{}, k string) string {
 	if v, ok := args[k].(string); ok {
 		return v
@@ -373,7 +494,6 @@ func jsonMarshalIndent(v interface{}) ([]byte, error) {
 	return marshalIndent(v)
 }
 
-// trimUnused keeps imports valid; remove if linters complain.
 var _ = strings.TrimSpace
 
 // sandboxEdit implements edit as read-modify-write over the worker sandbox
@@ -421,8 +541,7 @@ func (s *server) sandboxEdit(ctx context.Context, cid, path string, startLine, e
 	return fmt.Sprintf("Edited sandbox file '%s'.", path), nil
 }
 
-// rawMap coerces the workerCommand result to map[string]interface{} without
-// importing encoding/json here (already available via util).
+// rawMap coerces the workerCommand result to map[string]interface{}.
 func rawMap(v interface{}) map[string]interface{} {
 	if m, ok := v.(map[string]interface{}); ok {
 		return m
@@ -430,23 +549,9 @@ func rawMap(v interface{}) map[string]interface{} {
 	return map[string]interface{}{}
 }
 
-// strVal extracts a string field.
-func strVal(v map[string]interface{}) string {
-	if s, ok := v["content"].(string); ok {
-		return s
-	}
-	if s, ok := v["output"].(string); ok {
-		return s
-	}
-	if s, ok := v["result"].(string); ok {
-		return s
-	}
-	return ""
-}
-
-// portFile copies a file from the sandbox into the jj repo (Contents API).
-func (s *server) portFile(ctx context.Context, args map[string]interface{}) (string, error) {
-	cid := strArg(args, "_container_id")
+// portFile copies a file from the sandbox into the session's jj repo
+// (Contents API). The workspace bookmark is the destination branch.
+func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]interface{}) (string, error) {
 	sandboxPath := strArg(args, "sandbox_path")
 	repoPath := strArg(args, "repo_path")
 	message := strArg(args, "message")
@@ -455,23 +560,16 @@ func (s *server) portFile(ctx context.Context, args map[string]interface{}) (str
 	}
 
 	// 1. Read from sandbox (worker) via native file_read.
-	data, err := s.sandboxFileRead(ctx, cid, sandboxPath)
+	data, err := s.sandboxFileRead(ctx, sc.cid, sandboxPath)
 	if err != nil {
 		return "", fmt.Errorf("port sandbox read failed: %w", err)
 	}
-	content := string(data)
 
 	// 2. Write to jj-server via Contents API (base64).
-	org := strArg(args, "_org")
-	repo := strArg(args, "_repo")
-	branch := strArg(args, "_branch")
-	if branch == "" {
-		branch = "main"
-	}
 	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/%s/contents/%s",
-		s.jj, urlPathEscape(org), urlPathEscape(repo), urlPathEscape(branch), escapePath(repoPath))
+		s.jj, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo), urlPathEscape(sc.ws.bookmark), escapePath(repoPath))
 	body := map[string]interface{}{
-		"content": base64Encode(content),
+		"content": base64Encode(string(data)),
 		"message": message,
 	}
 	if _, err := s.httpPutJSON(ctx, url, body); err != nil {

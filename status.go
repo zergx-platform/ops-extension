@@ -1,0 +1,281 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"sort"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+)
+
+const version = "0.2.0"
+
+// status reports service dependencies' health for the frontend overview.
+func (s *server) status(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+
+	check := func(name, url string) map[string]interface{} {
+		cctx, ccancel := context.WithTimeout(ctx, 4*time.Second)
+		defer ccancel()
+		req, err := http.NewRequestWithContext(cctx, http.MethodGet, url, nil)
+		if err != nil {
+			return map[string]interface{}{"name": name, "ok": false, "error": err.Error()}
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return map[string]interface{}{"name": name, "ok": false, "error": err.Error()}
+		}
+		defer resp.Body.Close()
+		return map[string]interface{}{"name": name, "ok": resp.StatusCode < 300, "status": resp.StatusCode}
+	}
+
+	deps := []map[string]interface{}{
+		check("artifact", s.artifact+"/v2/"),
+		check("jj-server", s.jj+"/api/v1/health"),
+	}
+	bkOK := s.buildkit.Ping(ctx)
+	deps = append(deps, map[string]interface{}{"name": "buildkitd", "ok": bkOK})
+
+	containers, _ := s.k8s.ListContainers(ctx)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":        true,
+		"version":   version,
+		"deps":      deps,
+		"sandboxes": len(containers),
+	})
+}
+
+// sandboxesList returns worker pods with their session labels and the repo rev
+// each is synced to.
+func (s *server) sandboxesList(w http.ResponseWriter, r *http.Request) {
+	list, err := s.k8s.ListContainers(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.syncMu.Lock()
+	synced := make(map[string]string, len(s.synced))
+	for k, v := range s.synced {
+		synced[k] = v
+	}
+	s.syncMu.Unlock()
+
+	out := []map[string]interface{}{}
+	for _, c := range list {
+		out = append(out, map[string]interface{}{
+			"container_id": c.ContainerID,
+			"session":      c.SessionName,
+			"pod_name":     c.PodName,
+			"status":       c.Status,
+			"worker_url":   c.WorkerURL,
+			"pod_ip":       c.PodIP,
+			"synced_rev":   synced[c.ContainerID],
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"sandboxes": out})
+}
+
+// sandboxGet returns one session's sandbox pod plus the deployments it owns.
+func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
+	session := chi.URLParam(r, "session")
+	key := sessionKey(session)
+	info, err := s.k8s.FindContainer(r.Context(), key)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	s.syncMu.Lock()
+	syncedRev := s.synced[info.ContainerID]
+	s.syncMu.Unlock()
+
+	sandbox := map[string]interface{}{
+		"container_id": info.ContainerID,
+		"session":      info.SessionName,
+		"pod_name":     info.PodName,
+		"status":       info.Status,
+		"worker_url":   info.WorkerURL,
+		"pod_ip":       info.PodIP,
+		"synced_rev":   syncedRev,
+	}
+
+	deps, err := s.k8s.FindDeploymentsBySession(r.Context(), session)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	outDeps := []map[string]interface{}{}
+	for _, d := range deps {
+		outDeps = append(outDeps, map[string]interface{}{
+			"name":      d.Name,
+			"image":     d.Image,
+			"replicas":  d.Replicas,
+			"ready":     d.Ready,
+			"namespace": d.Namespace,
+			"age":       d.Age,
+			"ports":     d.Ports,
+			"session":   d.Session,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sandbox":     sandbox,
+		"deployments": outDeps,
+	})
+}
+
+// deploymentsList returns the deployments (services) this ops-extension owns.
+func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
+	list, err := s.k8s.ListDeployments(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := []map[string]interface{}{}
+	for _, d := range list {
+		out = append(out, map[string]interface{}{
+			"name":      d.Name,
+			"image":     d.Image,
+			"replicas":  d.Replicas,
+			"ready":     d.Ready,
+			"namespace": d.Namespace,
+			"age":       d.Age,
+			"ports":     d.Ports,
+			"session":   d.Session,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"deployments": out})
+}
+
+// deploymentPods returns the pods of one deployment.
+func (s *server) deploymentPods(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	pods, err := s.k8s.DeploymentPods(r.Context(), name)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := []map[string]interface{}{}
+	for _, p := range pods {
+		out = append(out, map[string]interface{}{
+			"name":     p.Name,
+			"ip":       p.IP,
+			"phase":    p.Phase,
+			"ready":    p.Ready,
+			"image":    p.Image,
+			"age":      p.Age,
+			"restarts": p.Restarts,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"pods": out})
+}
+
+// deploymentStatus reports the rollout state of one deployment.
+func (s *server) deploymentStatus(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	st, err := s.k8s.DeploymentStatus(r.Context(), name)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"observed_generation":  st.ObservedGeneration,
+		"updated_replicas":     st.UpdatedReplicas,
+		"ready_replicas":       st.ReadyReplicas,
+		"available_replicas":   st.AvailableReplicas,
+		"unavailable_replicas": st.UnavailableReplicas,
+		"conditions":           st.Conditions,
+	})
+}
+
+// deploymentDelete removes a deployment + service.
+func (s *server) deploymentDelete(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if err := s.k8s.DeleteDeployment(r.Context(), name); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+}
+
+// packagesList proxies the artifact registry's package list (avoids CORS and
+// keeps the artifact URL internal to the cluster).
+func (s *server) packagesList(w http.ResponseWriter, r *http.Request) {
+	body, err := s.httpGetRaw(r.Context(), s.artifact+"/pkgs/system/packages")
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "artifact: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// imagesList proxies the artifact OCI catalog (GET /v2/_catalog).
+func (s *server) imagesList(w http.ResponseWriter, r *http.Request) {
+	body, err := s.httpGetRaw(r.Context(), s.artifact+"/v2/_catalog")
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "artifact: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// publishSpecsHandler exports the per-protocol publish metadata so the
+// frontend can render a dynamic publish form.
+func (s *server) publishSpecsHandler(w http.ResponseWriter, r *http.Request) {
+	type specOut struct {
+		Protocol string   `json:"protocol"`
+		Args     []string `json:"args"`
+		Required []string `json:"required"`
+	}
+	out := make([]specOut, 0, len(publishSpecs))
+	for proto, spec := range publishSpecs {
+		out = append(out, specOut{Protocol: proto, Args: spec.args, Required: spec.required})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Protocol < out[j].Protocol })
+	writeJSON(w, http.StatusOK, map[string]interface{}{"specs": out})
+}
+
+// packagesPublish is the HTTP face of the package-publish tool.
+func (s *server) packagesPublish(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Protocol   string `json:"protocol"`
+		Org        string `json:"org"`
+		Repo       string `json:"repo"`
+		Bookmark   string `json:"bookmark"`
+		Session    string `json:"session"`
+		Name       string `json:"name"`
+		Version    string `json:"version"`
+		File       string `json:"file"`
+		Dockerfile string `json:"dockerfile_path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	args := map[string]interface{}{
+		"protocol": b.Protocol,
+		"org":      b.Org,
+		"repo":     b.Repo,
+		"bookmark": b.Bookmark,
+		"name":     b.Name,
+		"version":  b.Version,
+		"file":     b.File,
+	}
+	if b.Session != "" {
+		args["_session"] = b.Session
+	}
+	res, err := s.publishPackage(r.Context(), b.Protocol, b.Org, b.Repo, b.Bookmark,
+		b.Name, b.Version, b.File, b.Dockerfile)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": res})
+}

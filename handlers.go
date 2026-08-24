@@ -3,11 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
@@ -22,71 +19,15 @@ func (s *server) k8sConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) listContainers(w http.ResponseWriter, r *http.Request) {
-	list, err := s.k8s.ListContainers(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	out := []map[string]interface{}{}
-	for _, c := range list {
-		out = append(out, map[string]interface{}{
-			"container_id": c.ContainerID,
-			"pod_name":     c.PodName,
-			"worker_url":   c.WorkerURL,
-			"status":       c.Status,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"containers": out})
-}
-
-type createBody struct {
-	Image     *string `json:"image"`
-	SessionID *string `json:"session_id"`
-	Org       *string `json:"org"`
-	Repo      *string `json:"repo"`
-	Branch    *string `json:"branch"`
-}
-
-func (s *server) createContainer(w http.ResponseWriter, r *http.Request) {
-	var b createBody
-	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	containerID := uuid.New().String()
-	label := containerID
-	if b.SessionID != nil && *b.SessionID != "" {
-		label = *b.SessionID
-	}
-	image := ""
-	if b.Image != nil {
-		image = *b.Image
-	}
-	info, err := s.k8s.EnsureContainer(r.Context(), label, image)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("container creation failed: %v", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"container": map[string]interface{}{
-			"id":           containerID,
-			"name":         info.PodName,
-			"image":        image,
-			"worker_url":   info.WorkerURL,
-			"container_id": info.PodName,
-			"session_id":   b.SessionID,
-			"org":          b.Org,
-			"repo":         b.Repo,
-			"branch":       b.Branch,
-			"status":       info.Status,
-		},
-	})
+// sessionParam returns the deterministic container key for the {session} path
+// parameter (raw "org:repo:bookmark" → hash).
+func sessionParam(r *http.Request) string {
+	return sessionKey(param(r, "session"))
 }
 
 func (s *server) deleteContainer(w http.ResponseWriter, r *http.Request) {
-	cid := param(r, "cid")
-	if err := s.k8s.DestroyContainer(r.Context(), cid); err != nil {
+	session := param(r, "session")
+	if err := s.k8s.DestroyContainer(r.Context(), session); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -94,7 +35,7 @@ func (s *server) deleteContainer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) exec(w http.ResponseWriter, r *http.Request) {
-	cid := param(r, "cid")
+	key := sessionParam(r)
 	var b struct {
 		Command string `json:"command"`
 	}
@@ -102,7 +43,7 @@ func (s *server) exec(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "command required")
 		return
 	}
-	res, err := s.workerCommand(r.Context(), cid, "execute", map[string]interface{}{"command": b.Command})
+	res, err := s.workerCommand(r.Context(), key, "execute", map[string]interface{}{"command": b.Command})
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -111,8 +52,8 @@ func (s *server) exec(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) listJobs(w http.ResponseWriter, r *http.Request) {
-	cid := param(r, "cid")
-	res, err := s.workerCommand(r.Context(), cid, "jobs", map[string]interface{}{})
+	key := sessionParam(r)
+	res, err := s.workerCommand(r.Context(), key, "jobs", map[string]interface{}{})
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -121,10 +62,10 @@ func (s *server) listJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) jobOutput(w http.ResponseWriter, r *http.Request) {
-	cid := param(r, "cid")
+	key := sessionParam(r)
 	jobID := param(r, "jobID")
 	q := r.URL.Query()
-	res, err := s.workerCommand(r.Context(), cid, "job_output", map[string]interface{}{
+	res, err := s.workerCommand(r.Context(), key, "job_output", map[string]interface{}{
 		"job_id": jobID,
 		"stream": q.Get("stream"),
 		"start":  parseIntOr(q.Get("start"), -200),
@@ -138,7 +79,7 @@ func (s *server) jobOutput(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) jobWait(w http.ResponseWriter, r *http.Request) {
-	cid := param(r, "cid")
+	key := sessionParam(r)
 	jobID := param(r, "jobID")
 	var b struct {
 		TimeoutMS *int64 `json:"timeout_ms"`
@@ -148,7 +89,7 @@ func (s *server) jobWait(w http.ResponseWriter, r *http.Request) {
 	if b.TimeoutMS != nil {
 		timeout = *b.TimeoutMS
 	}
-	res, err := s.workerCommand(r.Context(), cid, "job_wait", map[string]interface{}{
+	res, err := s.workerCommand(r.Context(), key, "job_wait", map[string]interface{}{
 		"job_id":     jobID,
 		"timeout_ms": timeout,
 	})
@@ -160,14 +101,14 @@ func (s *server) jobWait(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) jobStdin(w http.ResponseWriter, r *http.Request) {
-	cid := param(r, "cid")
+	key := sessionParam(r)
 	jobID := param(r, "jobID")
 	var b struct {
 		Data  string `json:"data"`
 		Close bool   `json:"close"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
-	res, err := s.workerCommand(r.Context(), cid, "job_stdin", map[string]interface{}{
+	res, err := s.workerCommand(r.Context(), key, "job_stdin", map[string]interface{}{
 		"job_id": jobID,
 		"data":   b.Data,
 		"close":  b.Close,
@@ -180,9 +121,9 @@ func (s *server) jobStdin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) kill(w http.ResponseWriter, r *http.Request) {
-	cid := param(r, "cid")
+	key := sessionParam(r)
 	jobID := param(r, "jobID")
-	res, err := s.workerCommand(r.Context(), cid, "kill", map[string]interface{}{"job_id": jobID})
+	res, err := s.workerCommand(r.Context(), key, "kill", map[string]interface{}{"job_id": jobID})
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -196,7 +137,11 @@ func (s *server) sandboxRead(w http.ResponseWriter, r *http.Request) {
 		Path        string `json:"path"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
-	data, err := s.sandboxFileRead(r.Context(), b.ContainerID, b.Path)
+	cid := b.ContainerID
+	if cid == "" {
+		cid = sessionParam(r)
+	}
+	data, err := s.sandboxFileRead(r.Context(), cid, b.Path)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -211,7 +156,11 @@ func (s *server) sandboxWrite(w http.ResponseWriter, r *http.Request) {
 		Content     string `json:"content"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
-	if err := s.sandboxFileWrite(r.Context(), b.ContainerID, b.Path, []byte(b.Content)); err != nil {
+	cid := b.ContainerID
+	if cid == "" {
+		cid = sessionParam(r)
+	}
+	if err := s.sandboxFileWrite(r.Context(), cid, b.Path, []byte(b.Content)); err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -225,6 +174,7 @@ func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 		Replicas int32             `json:"replicas"`
 		Port     int32             `json:"port"`
 		Env      map[string]string `json:"env"`
+		Session  string            `json:"session"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
 	if b.Name == "" || b.Image == "" {
@@ -234,7 +184,7 @@ func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 	if b.Port == 0 {
 		b.Port = 8080
 	}
-	if err := s.k8s.EnsureDeployment(r.Context(), b.Name, b.Image, b.Replicas, b.Port, b.Env); err != nil {
+	if err := s.k8s.EnsureDeployment(r.Context(), b.Name, b.Image, b.Replicas, b.Port, b.Env, b.Session); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

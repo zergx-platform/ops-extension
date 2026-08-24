@@ -34,6 +34,16 @@ type buildBody struct {
 	Tag        string `json:"tag"`
 	Dockerfile string `json:"dockerfile"`
 	Push       bool   `json:"push"`
+	Raw        bool   `json:"raw"`
+}
+
+// BookmarkOrDefault returns the bookmark or "latest" for raw builds (needed
+// to form a valid image reference without a repo).
+func (b buildBody) BookmarkOrDefault() string {
+	if b.Bookmark == "" {
+		return "latest"
+	}
+	return b.Bookmark
 }
 
 // fetchRepoArchive downloads the tar.gz of org/repo@rev from jj-server into a
@@ -74,6 +84,38 @@ func (s *server) buildImage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
+
+	// Raw mode: build a pasted Containerfile from an empty context (no repo).
+	if b.Raw {
+		if strings.TrimSpace(b.Dockerfile) == "" {
+			writeErr(w, http.StatusBadRequest, "raw build requires dockerfile content")
+			return
+		}
+		if b.Tag == "" {
+			b.Tag = "latest"
+		}
+		tmpDir := filepath.Join(os.TempDir(), "ops-raw-"+uuid.NewString())
+		if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer os.RemoveAll(tmpDir)
+		if err := os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(b.Dockerfile), 0o644); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		fullTag := fmt.Sprintf("%s/%s:%s", s.artifactImageHost, b.Tag, b.BookmarkOrDefault())
+		imageID, err := s.buildkit.Build(r.Context(), tmpDir, "Dockerfile", fullTag)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, fmt.Sprintf("build failed: %v", err))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": true, "image_id": imageID, "image": fullTag, "pushed": true,
+		})
+		return
+	}
+
 	if b.Org == "" || b.Repo == "" || b.Bookmark == "" {
 		writeErr(w, http.StatusBadRequest, "org/repo/bookmark required")
 		return
