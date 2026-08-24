@@ -351,7 +351,7 @@ func (s *server) publishPackage(ctx context.Context, protocol, org, repo, bookma
 		}
 		specArgs["NPMRC_LINE"] = fmt.Sprintf("//%s/pkgs/npm/:_authToken=%s", hostOf(s.artifact), token)
 	}
-	if err := s.buildkit.Run(ctx, tmpDir, containerfile, specArgs); err != nil {
+	if err := s.buildkit.Run(ctx, tmpDir, containerfile, specArgs, nil); err != nil {
 		return "", fmt.Errorf("%s publish failed: %w", protocol, err)
 	}
 

@@ -46,8 +46,7 @@
       }
       for (const k of Object.keys(body)) if (!body[k]) delete body[k]
       const r = await api.publish(body)
-      result = r.ok ? (r.result ?? 'published') : (r.error ?? 'failed')
-      await refresh()
+      result = r.ok ? `submitted build ${r.build_id ?? ''}` : (r.error ?? 'failed')
     } catch (e) {
       result = String(e)
     } finally {

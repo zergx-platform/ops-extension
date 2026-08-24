@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 
 	"github.com/gorilla/websocket"
 
@@ -11,13 +13,42 @@ import (
 var wsUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
 // wsProxy forwards a WebSocket connection to the session worker's /ws
-// (RPC + job.completed broadcast). suffix "" = /ws, "/job" = /ws/job.
+// (RPC + job.completed broadcast).
 func (s *server) wsProxy(w http.ResponseWriter, r *http.Request) {
 	s.proxyWS(w, r, "")
 }
 
+// wsProxyJob proxies the session worker's per-job SSE stream (/ws/job) as
+// plain HTTP — the worker now serves job output over Server-Sent Events, not
+// WebSocket, so this is an ordinary streaming reverse proxy.
 func (s *server) wsProxyJob(w http.ResponseWriter, r *http.Request) {
-	s.proxyWS(w, r, "/job")
+	session := param(r, "session")
+	info, err := s.k8s.FindContainer(r.Context(), sessionKey(session))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if info.WorkerURL == "" {
+		writeErr(w, http.StatusServiceUnavailable, "worker not ready")
+		return
+	}
+
+	target, err := url.Parse(info.WorkerURL)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	rp := &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = target.Scheme
+			req.URL.Host = target.Host
+			req.URL.Path = "/ws/job"
+			// RawQuery (job_id=…) is preserved from the inbound request.
+		},
+		FlushInterval: -1, // stream each SSE event immediately
+	}
+	rp.ServeHTTP(w, r)
 }
 
 func (s *server) proxyWS(w http.ResponseWriter, r *http.Request, suffix string) {

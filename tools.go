@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -307,7 +308,13 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				if err != nil {
 					return "", nil, fmt.Errorf("container-build failed: %w", err)
 				}
-				return res, nil, nil
+				var submit struct {
+					BuildID string `json:"build_id"`
+				}
+				if err := json.Unmarshal([]byte(res), &submit); err != nil || submit.BuildID == "" {
+					return "", nil, fmt.Errorf("container-build failed: no build_id in %s", res)
+				}
+				return s.awaitBuild(ctx, submit.BuildID)
 			},
 		},
 		"container-deploy": {

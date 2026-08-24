@@ -25,9 +25,14 @@ func New(addr string) *Client {
 	return &Client{addr: addr}
 }
 
+// StatusSink receives a stream of build progress lines (vertex errors and
+// stdout/stderr log lines) as they arrive.
+type StatusSink func(line string)
+
 // Build builds `fullTag` from a context directory using the dockerfile.v0
-// frontend and pushes it to the registry (push=true image exporter).
-func (c *Client) Build(ctx context.Context, contextDir, dockerfile, fullTag string) (string, error) {
+// frontend and pushes it to the registry (push=true image exporter). onStatus,
+// when non-nil, receives build progress lines as they arrive.
+func (c *Client) Build(ctx context.Context, contextDir, dockerfile, fullTag string, onStatus StatusSink) (string, error) {
 	frontend := "dockerfile.v0"
 
 	// dockerfile path: original API carries a path relative to context root.
@@ -78,8 +83,17 @@ func (c *Client) Build(ctx context.Context, contextDir, dockerfile, fullTag stri
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for range ch {
-			// drain progress; progressui rendering is optional for the server
+		for st := range ch {
+			if onStatus != nil {
+				for _, v := range st.Vertexes {
+					if v.Error != "" {
+						onStatus("ERROR " + v.Name + ": " + v.Error)
+					}
+				}
+				for _, entry := range st.Logs {
+					onStatus(string(entry.Data))
+				}
+			}
 		}
 	}()
 
@@ -97,7 +111,7 @@ func (c *Client) Build(ctx context.Context, contextDir, dockerfile, fullTag stri
 //
 // On failure the tail of the build log (vertex errors + stdout/stderr) is
 // attached so callers can see why e.g. `npm publish` failed.
-func (c *Client) Run(ctx context.Context, contextDir, dockerfile string, buildArgs map[string]string) error {
+func (c *Client) Run(ctx context.Context, contextDir, dockerfile string, buildArgs map[string]string, onStatus StatusSink) error {
 	dfPath := dockerfile
 	if dfPath == "" {
 		dfPath = "Dockerfile"
@@ -140,6 +154,16 @@ func (c *Client) Run(ctx context.Context, contextDir, dockerfile string, buildAr
 		defer close(done)
 		for st := range ch {
 			lg.consume(st)
+			if onStatus != nil {
+				for _, v := range st.Vertexes {
+					if v.Error != "" {
+						onStatus("ERROR " + v.Name + ": " + v.Error)
+					}
+				}
+				for _, entry := range st.Logs {
+					onStatus(string(entry.Data))
+				}
+			}
 		}
 	}()
 

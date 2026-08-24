@@ -10,6 +10,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// wsReadTimeout must exceed the worker's job_wait cap (60s) by enough margin
+// that a job_wait response always arrives before this deadline. See
+// worker-go rpc.go jobWaitMaxMs.
+const wsReadTimeout = 65 * time.Second
+
 // CommandOnce opens a WS connection, sends one RPC command, and awaits the
 // matching response. Mirrors executor's channel::command_once.
 func CommandOnce(ctx context.Context, wsURL, method string, params map[string]interface{}) (interface{}, error) {
@@ -26,7 +31,7 @@ func CommandOnce(ctx context.Context, wsURL, method string, params map[string]in
 		return nil, fmt.Errorf("ws send: %w", err)
 	}
 
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(wsReadTimeout))
 	for {
 		var v map[string]interface{}
 		if err := conn.ReadJSON(&v); err != nil {

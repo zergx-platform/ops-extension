@@ -108,6 +108,18 @@ export const TemplateSchema = z.object({
   content: z.string(),
 })
 
+export const BuildSchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  tag: z.string(),
+  state: z.string(),
+  image: z.string().optional(),
+  error: z.string().optional(),
+  started_at: z.string(),
+  finished_at: z.string().nullable().optional(),
+  log_lines: z.number(),
+})
+
 // ---------- inferred types ----------
 
 export type Status = z.infer<typeof StatusSchema>
@@ -120,6 +132,7 @@ export type ExecResult = z.infer<typeof ExecResultSchema>
 export type Pkg = z.infer<typeof PkgSchema>
 export type PublishSpec = z.infer<typeof PublishSpecSchema>
 export type Template = z.infer<typeof TemplateSchema>
+export type Build = z.infer<typeof BuildSchema>
 
 // ---------- fetch plumbing ----------
 
@@ -160,9 +173,14 @@ export function sandboxWsUrl(session: string): string {
   return wsUrl(`${BASE}/sandboxes/${session}/ws`)
 }
 
-/** /sandboxes/{session}/ws/job?job_id= (per-job stream) URL. */
-export function sandboxJobWsUrl(session: string, jobId: string): string {
-  return wsUrl(`${BASE}/sandboxes/${session}/ws/job?job_id=${encodeURI(jobId)}`)
+/** /sandboxes/{session}/ws/job?job_id= (per-job SSE stream) URL. */
+export function sandboxJobStreamUrl(session: string, jobId: string): string {
+  return `${BASE}/sandboxes/${session}/ws/job?job_id=${encodeURI(jobId)}`
+}
+
+/** /builds/{id}/stream (SSE build log stream) URL. */
+export function buildStreamUrl(id: string): string {
+  return `${BASE}/builds/${enc(id)}/stream`
 }
 
 // ---------- api ----------
@@ -242,15 +260,23 @@ export const api = {
   buildImage: (b: { org: string; repo: string; bookmark: string; tag: string; dockerfile?: string }) =>
     req(
       '/images/build',
-      z.object({ ok: z.boolean(), image: z.string().optional(), error: z.string().optional() }),
+      z.object({ ok: z.boolean(), build_id: z.string().optional(), error: z.string().optional() }),
       jsonInit('POST', b),
     ),
 
   buildRaw: (b: { dockerfile: string; tag: string }) =>
     req(
       '/images/build',
-      z.object({ ok: z.boolean(), image: z.string().optional(), error: z.string().optional() }),
+      z.object({ ok: z.boolean(), build_id: z.string().optional(), error: z.string().optional() }),
       jsonInit('POST', { ...b, raw: true }),
+    ),
+
+  builds: () => req('/builds', z.object({ builds: z.array(BuildSchema) })),
+
+  build: (id: string) =>
+    req(
+      `/builds/${enc(id)}`,
+      z.object({ build: BuildSchema, logs: z.array(z.object({ stream: z.string(), line: z.string() })) }),
     ),
 
   templates: () => req('/containerfile-templates', z.object({ templates: z.array(TemplateSchema) })),
@@ -262,7 +288,7 @@ export const api = {
   publish: (b: Record<string, string>) =>
     req(
       '/packages/publish',
-      z.object({ ok: z.boolean(), result: z.string().optional(), error: z.string().optional() }),
+      z.object({ ok: z.boolean(), build_id: z.string().optional(), error: z.string().optional() }),
       jsonInit('POST', b),
     ),
 

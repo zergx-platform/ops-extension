@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { api, sandboxJobWsUrl, type Sandbox, type Job } from '$lib/api'
+  import { api, sandboxJobStreamUrl, type Sandbox, type Job } from '$lib/api'
   import Page from '$lib/components/Page.svelte'
   import * as Card from '$lib/components/ui/card'
   import * as Button from '$lib/components/ui/button'
@@ -22,7 +22,7 @@
   let termJobId = $state('')
   let termHistory = $state('')
   let termDone = $state(false)
-  let jobWs: WebSocket | null = null
+  let jobEs: EventSource | null = null
 
   async function refreshSandboxes() {
     try {
@@ -52,43 +52,42 @@
   }
 
   function openJobStream(jobId: string) {
-    closeJobWs()
+    closeJobEs()
     termJobId = jobId
     termHistory = ''
     termDone = false
-    jobWs = new WebSocket(sandboxJobWsUrl(session, jobId))
-    jobWs.onmessage = (e) => {
-      let m: any
+    jobEs = new EventSource(sandboxJobStreamUrl(session, jobId))
+    jobEs.addEventListener('job.output', (e) => {
       try {
-        m = JSON.parse(e.data)
-      } catch {
-        return
-      }
-      if (m.event === 'job.output') {
-        const p = m.params ?? {}
+        const p = JSON.parse((e as MessageEvent).data)
         if (p.job_id !== jobId) return
         termHistory += p.content ?? ''
-      } else if (m.event === 'job.history_end') {
-        termHistory += `\n[history_end: total ${m.params?.total ?? 0} lines]\n`
-      } else if (m.event === 'job.completed') {
-        const p = m.params ?? {}
+      } catch {}
+    })
+    jobEs.addEventListener('job.history_end', (e) => {
+      try {
+        const p = JSON.parse((e as MessageEvent).data)
+        termHistory += `\n[history_end: total ${p.total ?? 0} lines]\n`
+      } catch {}
+    })
+    jobEs.addEventListener('job.completed', (e) => {
+      try {
+        const p = JSON.parse((e as MessageEvent).data)
         if (p.job_id !== jobId) return
         termDone = true
         termHistory += `\n[${p.state ?? 'done'} exit=${p.exit_code}]\n`
         refreshJobs()
-      }
-    }
-    jobWs.onclose = () => {
+      } catch {}
+    })
+    jobEs.onerror = () => {
       if (!termDone) termHistory += '\n[stream closed]'
     }
   }
 
-  function closeJobWs() {
-    if (jobWs) {
-      jobWs.onmessage = null
-      jobWs.onclose = null
-      jobWs.close()
-      jobWs = null
+  function closeJobEs() {
+    if (jobEs) {
+      jobEs.close()
+      jobEs = null
     }
   }
 
@@ -131,7 +130,7 @@
     return () => clearInterval(t)
   })
 
-  onDestroy(() => closeJobWs())
+  onDestroy(() => closeJobEs())
 
   $effect(() => {
     void session

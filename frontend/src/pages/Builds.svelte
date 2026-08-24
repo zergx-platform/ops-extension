@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { api, type Template } from '$lib/api'
+  import { onMount, onDestroy } from 'svelte'
+  import { api, buildStreamUrl, type Template, type Build } from '$lib/api'
   import Page from '$lib/components/Page.svelte'
   import * as Card from '$lib/components/ui/card'
   import * as Button from '$lib/components/ui/button'
   import * as Input from '$lib/components/ui/input'
   import * as Select from '$lib/components/ui/native-select'
-  import * as Badge from '$lib/components/ui/badge'
-  import { Hammer } from '@lucide/svelte'
+  import { Badge } from '$lib/components/ui/badge'
+  import { Hammer, RefreshCw } from '@lucide/svelte'
 
   // ---- mode: repo (org/repo/bookmark) or raw (paste a Containerfile) ----
   let mode = $state<'repo' | 'raw'>('repo')
@@ -19,41 +19,92 @@
   let dockerfile = $state('Dockerfile')
   let rawContent = $state('FROM alpine:3.20\n\nCMD ["sh", "-c", "echo hello"]\n')
   let building = $state(false)
-  let result = $state('')
 
   let images: string[] = $state([])
   let templates: Template[] = $state([])
 
+  // ---- build history + live log ----
+  let builds: Build[] = $state([])
+  let activeBuildId = $state('')
+  let logLines: { stream: string; line: string }[] = $state([])
+  let activeState = $state('')
+  let es: EventSource | null = null
+
   async function build() {
     building = true
-    result = ''
     try {
-      let r: { ok: boolean; image?: string; error?: string }
-      if (mode === 'repo') {
-        const b: Record<string, string> = { tag, dockerfile }
-        if (session) b.session = session
-        else {
-          b.org = org
-          b.repo = repo
-          b.bookmark = bookmark
-        }
-        r = await api.buildImage({
-          org: b.org ?? '',
-          repo: b.repo ?? '',
-          bookmark: b.bookmark ?? 'main',
-          tag,
-          dockerfile,
-        })
+      const r =
+        mode === 'repo'
+          ? await api.buildImage({ org, repo, bookmark, tag, dockerfile })
+          : await api.buildRaw({ dockerfile: rawContent, tag })
+      if (r.ok && r.build_id) {
+        openStream(r.build_id)
       } else {
-        r = await api.buildRaw({ dockerfile: rawContent, tag })
+        logLines = [{ stream: 'error', line: r.error ?? 'failed' }]
       }
-      result = r.ok ? `built ${r.image}` : (r.error ?? 'failed')
-      images = (await api.images()).repositories
+      await refreshBuilds()
     } catch (e) {
-      result = String(e)
+      logLines = [{ stream: 'error', line: String(e) }]
     } finally {
       building = false
     }
+  }
+
+  function openStream(id: string) {
+    closeStream()
+    activeBuildId = id
+    activeState = 'running'
+    logLines = []
+    es = new EventSource(buildStreamUrl(id))
+    es.addEventListener('log', (e) => {
+      try {
+        const d = JSON.parse((e as MessageEvent).data)
+        logLines = [...logLines, d]
+      } catch {}
+    })
+    es.addEventListener('state', (e) => {
+      try {
+        const d = JSON.parse((e as MessageEvent).data)
+        activeState = d.state
+      } catch {}
+    })
+    es.addEventListener('done', (e) => {
+      try {
+        const d = JSON.parse((e as MessageEvent).data)
+        activeState = d.state
+      } catch {}
+      refreshBuilds()
+      closeStream()
+    })
+    es.onerror = () => {
+      // EventSource auto-reconnects; keep the stream open. When the server
+      // closed after completion, onerror fires after 'done' and closeStream
+      // already detached.
+    }
+  }
+
+  function closeStream() {
+    if (es) {
+      es.close()
+      es = null
+    }
+    activeBuildId = ''
+  }
+
+  async function refreshBuilds() {
+    try {
+      builds = (await api.builds()).builds
+      images = (await api.images()).repositories
+    } catch {}
+  }
+
+  async function viewBuild(id: string) {
+    try {
+      const r = await api.build(id)
+      activeBuildId = id
+      activeState = r.build.state
+      logLines = r.logs
+    } catch {}
   }
 
   function loadTemplate(t: Template) {
@@ -65,8 +116,11 @@
     try {
       images = (await api.images()).repositories
       templates = (await api.templates()).templates
+      builds = (await api.builds()).builds
     } catch {}
   })
+
+  onDestroy(() => closeStream())
 </script>
 
 <Page title="Builds" desc="Build container images (from a repo or a pasted Containerfile) via buildkitd">
@@ -107,10 +161,20 @@
         {/if}
         <div class="flex items-center gap-2">
           <Button.Root onclick={build} disabled={building || !tag || (mode === 'repo' && !session && (!org || !repo))}>
-            <Hammer class="size-4" /> {building ? 'Building…' : 'Build + push'}
+            <Hammer class="size-4" /> {building ? 'Submitting…' : 'Build + push'}
           </Button.Root>
+          {#if activeBuildId}
+            <span class="text-xs text-muted-foreground">
+              build {activeBuildId.slice(0, 8)}
+              <Badge variant={activeState === 'running' ? 'default' : activeState === 'done' ? 'secondary' : 'destructive'}>
+                {activeState}
+              </Badge>
+            </span>
+          {/if}
         </div>
-        {#if result}<pre class="rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap">{result}</pre>{/if}
+        {#if logLines.length}
+          <pre class="max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap">{logLines.map((l) => l.line).join('\n')}</pre>
+        {/if}
       </Card.Content>
     </Card.Root>
 
@@ -126,6 +190,51 @@
       </Card.Content>
     </Card.Root>
   </div>
+
+  <Card.Root class="mt-4">
+    <Card.Header class="flex-row items-center justify-between">
+      <Card.Title class="text-sm">Builds ({builds.length})</Card.Title>
+      <Button.Root variant="ghost" size="icon" onclick={refreshBuilds}><RefreshCw class="size-4" /></Button.Root>
+    </Card.Header>
+    <Card.Content>
+      {#if builds.length === 0}
+        <p class="py-4 text-center text-sm text-muted-foreground">No builds yet.</p>
+      {:else}
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b text-left text-muted-foreground">
+                <th class="py-2 pr-4 font-medium">ID</th>
+                <th class="py-2 pr-4 font-medium">Kind</th>
+                <th class="py-2 pr-4 font-medium">Tag</th>
+                <th class="py-2 pr-4 font-medium">State</th>
+                <th class="py-2 pr-4 font-medium">Lines</th>
+                <th class="py-2 pr-4 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each builds as b (b.id)}
+                <tr class="border-b last:border-0">
+                  <td class="py-2 pr-4 font-mono text-xs">{b.id.slice(0, 8)}</td>
+                  <td class="py-2 pr-4 text-xs">{b.kind}</td>
+                  <td class="py-2 pr-4 font-mono text-xs">{b.tag}</td>
+                  <td class="py-2 pr-4">
+                    <Badge variant={b.state === 'running' ? 'default' : b.state === 'done' ? 'secondary' : 'destructive'}>
+                      {b.state}
+                    </Badge>
+                  </td>
+                  <td class="py-2 pr-4 font-mono text-xs text-muted-foreground">{b.log_lines}</td>
+                  <td class="py-2 pr-4 text-right">
+                    <Button.Root size="sm" variant="outline" onclick={() => viewBuild(b.id)}>view</Button.Root>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </Card.Content>
+  </Card.Root>
 
   <Card.Root class="mt-4">
     <Card.Header><Card.Title class="text-sm">Registry images ({images.length})</Card.Title></Card.Header>

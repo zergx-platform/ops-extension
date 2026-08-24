@@ -34,6 +34,8 @@ type server struct {
 
 	// workerResolver overrides worker URL resolution (tests).
 	workerResolver func(cid string) (string, error)
+
+	builds sync.Map // build id -> *buildTask
 }
 
 func main() {
@@ -122,6 +124,9 @@ func main() {
 		r.Post("/deployments", s.deploy)
 		r.Get("/infra/k8s/config", s.k8sConfig)
 		r.Post("/images/build", s.buildImage)
+		r.Get("/builds", s.buildsList)
+		r.Get("/builds/{id}", s.buildGet)
+		r.Get("/builds/{id}/stream", s.buildStream)
 		r.Get("/containerfile-templates", s.containerfileTemplates)
 		r.Get("/status", s.status)
 		r.Get("/deployments", s.deploymentsList)

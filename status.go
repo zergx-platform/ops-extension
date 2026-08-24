@@ -259,23 +259,21 @@ func (s *server) packagesPublish(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	args := map[string]interface{}{
-		"protocol": b.Protocol,
-		"org":      b.Org,
-		"repo":     b.Repo,
-		"bookmark": b.Bookmark,
-		"name":     b.Name,
-		"version":  b.Version,
-		"file":     b.File,
-	}
-	if b.Session != "" {
-		args["_session"] = b.Session
-	}
-	res, err := s.publishPackage(r.Context(), b.Protocol, b.Org, b.Repo, b.Bookmark,
-		b.Name, b.Version, b.File, b.Dockerfile)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	if b.Protocol == "" {
+		writeErr(w, http.StatusBadRequest, "protocol required")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": res})
+
+	id := s.startPublishTask(publishTaskBody{
+		Protocol:   b.Protocol,
+		Org:        b.Org,
+		Repo:       b.Repo,
+		Bookmark:   b.Bookmark,
+		Session:    b.Session,
+		Name:       b.Name,
+		Version:    b.Version,
+		File:       b.File,
+		Dockerfile: b.Dockerfile,
+	})
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
 }

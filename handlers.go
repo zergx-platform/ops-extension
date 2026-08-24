@@ -89,6 +89,14 @@ func (s *server) jobWait(w http.ResponseWriter, r *http.Request) {
 	if b.TimeoutMS != nil {
 		timeout = *b.TimeoutMS
 	}
+	// Clamp to [1s, 60s]: the worker caps job_wait at 60s and the WS read
+	// deadline is 65s, so anything above 60s can never return in time.
+	if timeout < 1000 {
+		timeout = 1000
+	}
+	if timeout > 60_000 {
+		timeout = 60_000
+	}
 	res, err := s.workerCommand(r.Context(), key, "job_wait", map[string]interface{}{
 		"job_id":     jobID,
 		"timeout_ms": timeout,
