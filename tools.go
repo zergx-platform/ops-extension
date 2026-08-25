@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	extensionsdk "forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go"
+
+	"rucoder-agent/ops-extension/internal/worker"
 )
 
 // tools returns the NATS tool set. Sandbox tools are session-scoped: the
@@ -26,7 +28,8 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				},
 				"required": []string{"command"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ func(string)) (string, map[string]interface{}, error) {
+			Streaming: true,
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, emit func(string)) (string, map[string]interface{}, error) {
 				command := strArg(args, "command")
 				if command == "" {
 					return "", nil, fmt.Errorf("sandbox-run: missing 'command'")
@@ -35,42 +38,59 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 				if err != nil {
 					return "", nil, err
 				}
-				res, err := s.workerCommand(ctx, sc.cid, "execute", map[string]interface{}{
-					"command": command,
-					"rev":     sc.ws.rev,
-				})
+				workerURL, err := s.resolveWorkerURL(ctx, sc.cid)
 				if err != nil {
-					return "", nil, fmt.Errorf("sandbox-run failed: %w", err)
+					return "", nil, err
 				}
-				// Worker may have restarted (synced_rev lost) or, in worker
-				// builds where the HTTP and WS rev trackers are separate
-				// states, never observe the pushed rev: re-sync once and
-				// retry; if the worker still refuses while we know we pushed
-				// this exact rev, execute without the rev gate (content is
-				// verified synced on our side).
-				if m := rawMap(res); m["need_sync"] == true {
-					s.markUnsynced(sc.cid)
-					if err := s.ensureSynced(ctx, sc.cid, sc.ws); err != nil {
-						return "", nil, err
-					}
-					res, err = s.workerCommand(ctx, sc.cid, "execute", map[string]interface{}{
-						"command": command,
-						"rev":     sc.ws.rev,
-					})
-					if err != nil {
+
+				run := func(rev string) (worker.ExecuteResult, error) {
+					return worker.Execute(ctx, worker.ToWsURL(workerURL), command, rev)
+				}
+
+				res, err := run(sc.ws.rev)
+				if err != nil {
+					// Worker may have restarted (synced_rev lost): re-sync once
+					// and retry; if it still refuses, execute without the rev
+					// gate (content is verified synced on our side).
+					if strings.Contains(err.Error(), "need_sync") {
+						s.markUnsynced(sc.cid)
+						if err := s.ensureSynced(ctx, sc.cid, sc.ws); err != nil {
+							return "", nil, err
+						}
+						if res, err = run(sc.ws.rev); err != nil {
+							if res, err = run(""); err != nil {
+								return "", nil, fmt.Errorf("sandbox-run failed: %w", err)
+							}
+						}
+					} else {
 						return "", nil, fmt.Errorf("sandbox-run failed: %w", err)
 					}
-					if m := rawMap(res); m["need_sync"] == true {
-						fmt.Printf("[ops-extension] worker %s still need_sync after push of %s; executing without rev gate\n", sc.cid, sc.ws.rev)
-						res, err = s.workerCommand(ctx, sc.cid, "execute", map[string]interface{}{
-							"command": command,
-						})
-						if err != nil {
-							return "", nil, fmt.Errorf("sandbox-run failed: %w", err)
-						}
-					}
 				}
-				return toJSON(res), nil, nil
+
+				// Synchronously completed: emit merged output as one delta for
+				// parity, then a natural-language final.
+				if res.Final {
+					content := fmt.Sprintf("命令执行完成（exit %d）\n%s", res.ExitCode, res.Output)
+					return content, map[string]interface{}{"exit_code": res.ExitCode}, nil
+				}
+
+				// Backgrounded: stream the per-job SSE output as deltas, then a
+				// natural-language final once completed.
+				done, err := worker.StreamJobOutput(ctx, workerURL, res.JobID, emit)
+				if err != nil {
+					return "", nil, fmt.Errorf("sandbox-run stream failed: %w", err)
+				}
+				content := fmt.Sprintf("命令已后台完成（job %s, exit %d）", res.JobID, done.ExitCode)
+				if done.Stdout != "" {
+					content += "\n" + done.Stdout
+				}
+				if done.Stderr != "" {
+					content += "\n[stderr]\n" + done.Stderr
+				}
+				return content, map[string]interface{}{
+					"job_id":   res.JobID,
+					"exit_code": done.ExitCode,
+				}, nil
 			},
 		},
 		"sandbox-read": {

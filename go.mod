@@ -3,7 +3,7 @@ module rucoder-agent/ops-extension
 go 1.26.3
 
 require (
-	forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.6
+	forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.7
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
@@ -107,3 +107,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.3 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go => ../extension-sdk-go
