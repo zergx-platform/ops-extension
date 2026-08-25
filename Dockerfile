@@ -15,7 +15,7 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io
 WORKDIR /fe
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN corepack enable && pnpm install --frozen-lockfile || pnpm install
+RUN npm install -g pnpm && (pnpm install --frozen-lockfile || pnpm install)
 COPY frontend/ ./
 RUN pnpm build
 
