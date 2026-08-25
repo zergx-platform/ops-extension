@@ -67,20 +67,14 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 					}
 				}
 
-				// Synchronously completed: emit merged output as one delta for
-				// parity, then a natural-language final.
-				if res.Final {
-					content := fmt.Sprintf("命令执行完成（exit %d）\n%s", res.ExitCode, res.Output)
-					return content, map[string]interface{}{"exit_code": res.ExitCode}, nil
-				}
-
-				// Backgrounded: stream the per-job SSE output as deltas, then a
-				// natural-language final once completed.
+				// Every command is a streamed job: subscribe to the per-job SSE
+				// stream, emit output as deltas, and return a natural-language
+				// final once completed.
 				done, err := worker.StreamJobOutput(ctx, workerURL, res.JobID, emit)
 				if err != nil {
 					return "", nil, fmt.Errorf("sandbox-run stream failed: %w", err)
 				}
-				content := fmt.Sprintf("命令已后台完成（job %s, exit %d）", res.JobID, done.ExitCode)
+				content := fmt.Sprintf("命令执行完成（job %s, exit %d）", res.JobID, done.ExitCode)
 				if done.Stdout != "" {
 					content += "\n" + done.Stdout
 				}
@@ -88,7 +82,7 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 					content += "\n[stderr]\n" + done.Stderr
 				}
 				return content, map[string]interface{}{
-					"job_id":   res.JobID,
+					"job_id":    res.JobID,
 					"exit_code": done.ExitCode,
 				}, nil
 			},

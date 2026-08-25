@@ -50,22 +50,14 @@ func CommandOnce(ctx context.Context, wsURL, method string, params map[string]in
 	}
 }
 
-// ExecuteResult is the normalized outcome of a streamed execute.
+// ExecuteResult is the normalized outcome of a streamed execute. Every
+// command is a job (the worker has no fast/slow split), so JobID is always
+// set.
 type ExecuteResult struct {
-	// Final is true when the command finished and produced a terminal result;
-	// false when it was backgrounded (jobID set, no merged output yet).
-	Final bool
-	// JobID is set when the command exceeded the sync window and was promoted
-	// to a background job.
 	JobID string
-	// ExitCode and Output hold the merged result of a synchronously completed
-	// command (Final == true, JobID == "").
-	ExitCode int
-	Output   string
 }
 
-// Execute runs `execute` on the worker, returning the response. Long commands
-// are backgrounded by the worker (job_id + backgrounded:true); the caller
+// Execute runs `execute` on the worker, returning the job id. The caller
 // then subscribes to the per-job SSE stream via StreamJobOutput.
 func Execute(ctx context.Context, wsURL, command, rev string) (ExecuteResult, error) {
 	params := map[string]interface{}{"command": command}
@@ -80,16 +72,11 @@ func Execute(ctx context.Context, wsURL, command, rev string) (ExecuteResult, er
 	if !ok {
 		return ExecuteResult{}, fmt.Errorf("execute: unexpected response %T", res)
 	}
-	if bg, _ := m["backgrounded"].(bool); bg {
-		jid, _ := m["job_id"].(string)
-		return ExecuteResult{Final: false, JobID: jid}, nil
+	jid, _ := m["job_id"].(string)
+	if jid == "" {
+		return ExecuteResult{}, fmt.Errorf("execute: missing job_id in %v", m)
 	}
-	if ns, _ := m["need_sync"].(bool); ns {
-		return ExecuteResult{}, fmt.Errorf("need_sync")
-	}
-	exit, _ := m["exit_code"].(float64)
-	output, _ := m["output"].(string)
-	return ExecuteResult{Final: true, ExitCode: int(exit), Output: output}, nil
+	return ExecuteResult{JobID: jid}, nil
 }
 
 // StreamJobOutput opens the worker's per-job SSE stream (/ws/job?job_id=…)

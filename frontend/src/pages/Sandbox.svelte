@@ -37,8 +37,9 @@
     output = ''
     try {
       const r = await api.exec(session, cmd)
-      if (r.backgrounded && r.job_id) {
-        output = `[backgrounded: ${r.job_id}]`
+      // Every command is a streamed job (no fast/slow split).
+      if (r.job_id) {
+        output = `[job: ${r.job_id}]`
         openJobStream(r.job_id)
         await refreshJobs()
       } else {

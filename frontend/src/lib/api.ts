@@ -73,10 +73,10 @@ export const JobSchema = z.object({
 })
 
 export const ExecResultSchema = z.object({
-  exit_code: z.number(),
-  output: z.string(),
+  exit_code: z.number().optional(),
+  output: z.string().optional(),
   backgrounded: z.boolean().optional(),
-  job_id: z.string().optional(),
+  job_id: z.string(),
 })
 
 export const FileReadSchema = z.object({
