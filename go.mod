@@ -107,5 +107,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.3 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-
-replace forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go => ../extension-sdk-go
