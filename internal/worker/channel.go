@@ -123,6 +123,7 @@ func StreamJobOutput(ctx context.Context, workerURL, jobID string, onOutput func
 					Content string `json:"content"`
 				}
 				if json.Unmarshal([]byte(payload), &ev) == nil {
+					fmt.Printf("[worker] job.output %q\n", ev.Content)
 					onOutput(ev.Content)
 				}
 			} else if eventName == "job.completed" {

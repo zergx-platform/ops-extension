@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
-	extensionsdk "forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go"
+	abep "abep.dev/sdk"
+	natsbus "abep.dev/sdk/nats"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
@@ -19,7 +22,7 @@ import (
 
 type server struct {
 	k8s               *k8s.Manager
-	ext               *extensionsdk.Extension
+	ext               *abep.Extension
 	buildkit          *buildkit.Client
 	artifact          string // artifact registry base URL (packages + OCI + metadata)
 	artifactImageHost string // TLS ingress host for image refs (FROM/push via buildkit)
@@ -89,16 +92,23 @@ func main() {
 	// POST /api/v1/tools/{name} with a JSON args body.
 	toolBridge := false
 	if os.Getenv("RUCODER_DISABLE_NATS") != "1" {
-		ext, err := extensionsdk.Register(extensionsdk.Config{
-			ID:      "ops-extension",
-			Version: "0.1.0",
-			NATSURL: natsURL,
-			Tools:   s.tools(),
-		})
+		nbus, err := natsbus.Connect(natsURL)
 		if err != nil {
 			panic(fmt.Sprintf("extension: %v", err))
 		}
+		ext := abep.NewExtension(nbus, abep.Config{
+			ID:      "ops-extension",
+			Version: "0.1.0",
+			Tools:   s.tools(),
+		})
 		s.ext = ext
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		go func() {
+			if err := ext.Serve(ctx); err != nil {
+				fmt.Printf("[ops-extension] serve: %v\n", err)
+			}
+		}()
 		defer ext.Close()
 	} else {
 		toolBridge = true
@@ -166,7 +176,7 @@ func (s *server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid args body: "+err.Error())
 		return
 	}
-	out, _, err := spec.Execute(r.Context(), args, "http-verify", func(string) {})
+	out, _, err := spec.Execute(r.Context(), args, "http-verify", "", func(string) {})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
