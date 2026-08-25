@@ -218,7 +218,7 @@ func (s *server) runBuildTask(t *buildTask, b buildBody) {
 				return "", err
 			}
 			fullTag := fmt.Sprintf("%s/%s:%s", s.artifactImageHost, b.Tag, b.BookmarkOrDefault())
-			return s.buildkit.Build(ctx, tmpDir, "Dockerfile", fullTag, onStatus)
+			return s.buildkit.Build(ctx, tmpDir, "Dockerfile", fullTag, onStatus, b.NoCache)
 		}
 		tmpDir, err := s.fetchRepoArchive(ctx, b.Org, b.Repo, b.Bookmark)
 		if err != nil {
@@ -230,7 +230,7 @@ func (s *server) runBuildTask(t *buildTask, b buildBody) {
 		if df == "" {
 			df = "Dockerfile"
 		}
-		return s.buildkit.Build(ctx, tmpDir, df, fullTag, onStatus)
+		return s.buildkit.Build(ctx, tmpDir, df, fullTag, onStatus, b.NoCache)
 	}
 
 	image, err := build()

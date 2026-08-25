@@ -35,6 +35,7 @@ type buildBody struct {
 	Dockerfile string `json:"dockerfile"`
 	Push       bool   `json:"push"`
 	Raw        bool   `json:"raw"`
+	NoCache    bool   `json:"no_cache"`
 }
 
 // BookmarkOrDefault returns the bookmark or "latest" for raw builds (needed

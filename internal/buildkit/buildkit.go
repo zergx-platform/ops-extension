@@ -31,8 +31,10 @@ type StatusSink func(line string)
 
 // Build builds `fullTag` from a context directory using the dockerfile.v0
 // frontend and pushes it to the registry (push=true image exporter). onStatus,
-// when non-nil, receives build progress lines as they arrive.
-func (c *Client) Build(ctx context.Context, contextDir, dockerfile, fullTag string, onStatus StatusSink) (string, error) {
+// when non-nil, receives build progress lines as they arrive. When noCache is
+// true the dockerfile frontend gets "no-cache" so buildkit recomputes every
+// vertex instead of reusing stale cached layers.
+func (c *Client) Build(ctx context.Context, contextDir, dockerfile, fullTag string, onStatus StatusSink, noCache bool) (string, error) {
 	frontend := "dockerfile.v0"
 
 	// dockerfile path: original API carries a path relative to context root.
@@ -77,6 +79,9 @@ func (c *Client) Build(ctx context.Context, contextDir, dockerfile, fullTag stri
 		},
 		Frontend:      frontend,
 		FrontendAttrs: map[string]string{"filename": filepath.Base(dfPath)},
+	}
+	if noCache {
+		solveOpt.FrontendAttrs["no-cache"] = ""
 	}
 
 	ch := make(chan *client.SolveStatus)
