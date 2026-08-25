@@ -4,7 +4,7 @@
 # dependency is resolved from go.mod (forgejo module), not copied from a
 # sibling directory.
 ARG REGISTRY=rucoder-artifact.temp.10.199.64.20.nip.io
-ARG NODE_IMAGE=22-alpine
+ARG NODE_IMAGE=26-alpine
 ARG GO_IMAGE=golang:1.26-alpine
 
 FROM ${REGISTRY}/node:${NODE_IMAGE} AS frontend
