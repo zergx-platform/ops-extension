@@ -287,6 +287,7 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 					"dockerfile_path": map[string]interface{}{"type": "string"},
 					"tag":             map[string]interface{}{"type": "string"},
 					"context":         map[string]interface{}{"type": "string"},
+					"no_cache":        map[string]interface{}{"type": "boolean"},
 				},
 				"required": []string{"dockerfile_path", "tag"},
 			},
@@ -303,6 +304,7 @@ func (s *server) tools() map[string]extensionsdk.ToolSpec {
 					"tag":        strArg(args, "tag"),
 					"context":    strArg(args, "context"),
 					"push":       true,
+					"no_cache":   boolArg(args, "no_cache"),
 				}
 				res, err := s.httpPostJSON(ctx, selfBase()+"/api/v1/images/build", payload)
 				if err != nil {
@@ -487,6 +489,13 @@ func intArg64(args map[string]interface{}, k string, def int64) int64 {
 		return int64(v)
 	}
 	return def
+}
+
+func boolArg(args map[string]interface{}, k string) bool {
+	if v, ok := args[k].(bool); ok {
+		return v
+	}
+	return false
 }
 
 func toJSON(v interface{}) string {

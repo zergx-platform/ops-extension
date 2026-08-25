@@ -257,14 +257,14 @@ export const api = {
 
   images: () => req('/images', z.object({ repositories: z.array(z.string()) })),
 
-  buildImage: (b: { org: string; repo: string; bookmark: string; tag: string; dockerfile?: string }) =>
+  buildImage: (b: { org: string; repo: string; bookmark: string; tag: string; dockerfile?: string; no_cache?: boolean }) =>
     req(
       '/images/build',
       z.object({ ok: z.boolean(), build_id: z.string().optional(), error: z.string().optional() }),
       jsonInit('POST', b),
     ),
 
-  buildRaw: (b: { dockerfile: string; tag: string }) =>
+  buildRaw: (b: { dockerfile: string; tag: string; no_cache?: boolean }) =>
     req(
       '/images/build',
       z.object({ ok: z.boolean(), build_id: z.string().optional(), error: z.string().optional() }),

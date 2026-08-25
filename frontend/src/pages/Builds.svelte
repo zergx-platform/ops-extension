@@ -18,6 +18,7 @@
   let tag = $state('')
   let dockerfile = $state('Dockerfile')
   let rawContent = $state('FROM alpine:3.20\n\nCMD ["sh", "-c", "echo hello"]\n')
+  let noCache = $state(false)
   let building = $state(false)
 
   let images: string[] = $state([])
@@ -35,8 +36,8 @@
     try {
       const r =
         mode === 'repo'
-          ? await api.buildImage({ org, repo, bookmark, tag, dockerfile })
-          : await api.buildRaw({ dockerfile: rawContent, tag })
+          ? await api.buildImage({ org, repo, bookmark, tag, dockerfile, no_cache: noCache })
+          : await api.buildRaw({ dockerfile: rawContent, tag, no_cache: noCache })
       if (r.ok && r.build_id) {
         openStream(r.build_id)
       } else {
@@ -159,10 +160,14 @@
             bind:value={rawContent}
           ></textarea>
         {/if}
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-3">
           <Button.Root onclick={build} disabled={building || !tag || (mode === 'repo' && !session && (!org || !repo))}>
             <Hammer class="size-4" /> {building ? 'Submitting…' : 'Build + push'}
           </Button.Root>
+          <label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input type="checkbox" bind:checked={noCache} />
+            no-cache
+          </label>
           {#if activeBuildId}
             <span class="text-xs text-muted-foreground">
               build {activeBuildId.slice(0, 8)}
