@@ -38,6 +38,14 @@ type buildBody struct {
 	NoCache    bool   `json:"no_cache"`
 }
 
+// ForceNoCache resolves the effective no-cache flag. The raw-content build
+// path has no content-addressable context (the Dockerfile is the whole
+// context), so it must always invalidate — otherwise buildkit would serve the
+// previous build's output forever even when the raw content changed.
+func (b buildBody) ForceNoCache() bool {
+	return b.NoCache || b.Raw
+}
+
 // BookmarkOrDefault returns the bookmark or "latest" for raw builds (needed
 // to form a valid image reference without a repo).
 func (b buildBody) BookmarkOrDefault() string {
