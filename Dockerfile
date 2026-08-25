@@ -27,7 +27,10 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io \
     GOINSECURE=forgejo.develop.10.199.64.20.nip.io \
     GOPRIVATE=forgejo.develop.10.199.64.20.nip.io \
-    GOPROXY=https://proxy.golang.org,direct
+    GOPROXY=http://rucoder-artifact.temp.svc.cluster.local/pkgs/go,https://proxy.golang.org,direct \
+    GOSUMDB=off \
+    GONOSUMDB=abep.dev/sdk,abep.dev/sdk/nats,abep.dev/sdk/ws \
+    GOFLAGS=-mod=mod
 RUN apk add --no-cache git \
     && git config --global http.sslVerify false \
     && git config --global url."https://root:devpassword@forgejo.develop.10.199.64.20.nip.io/".insteadOf "https://forgejo.develop.10.199.64.20.nip.io/"
