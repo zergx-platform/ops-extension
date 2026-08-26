@@ -31,7 +31,8 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     GOSUMDB=off \
     GONOSUMDB=abep.dev/sdk,abep.dev/sdk/nats,abep.dev/sdk/ws \
     GOFLAGS=-mod=mod
-RUN apk add --no-cache git \
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories \
+    && apk add --no-cache git \
     && git config --global http.sslVerify false \
     && git config --global url."https://root:devpassword@forgejo.develop.10.199.64.20.nip.io/".insteadOf "https://forgejo.develop.10.199.64.20.nip.io/"
 WORKDIR /src
