@@ -130,14 +130,14 @@ func TestResolveWorkspaceSessionName(t *testing.T) {
 
 	ws, sid, err := s.resolveWorkspace(context.Background(), map[string]interface{}{
 		"_session": "verify:exists:main",
-	})
+	}, "")
 	if err != nil || ws.org != "verify" || ws.repo != "exists" || ws.bookmark != "main" || ws.rev != "abc123" || sid != "verify:exists:main" {
 		t.Fatalf("ws=%+v sid=%q err=%v", ws, sid, err)
 	}
 
 	if _, _, err := s.resolveWorkspace(context.Background(), map[string]interface{}{
 		"_session": "not-a-derived-name",
-	}); err == nil {
+	}, ""); err == nil {
 		t.Fatal("non-derived session name must error")
 	}
 }

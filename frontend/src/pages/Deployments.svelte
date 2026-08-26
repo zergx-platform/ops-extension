@@ -19,11 +19,16 @@
   let dReplicas = $state(1)
   let dPort = $state(8080)
   let dSession = $state('')
+  let dCpuRequest = $state('')
+  let dMemRequest = $state('')
+  let dCpuLimit = $state('')
+  let dMemLimit = $state('')
   let dResult = $state('')
   let deploying = $state(false)
 
   let busy = $state('')
   let expanded = $state<Record<string, { pods: Pod[]; status: DeploymentStatus | null }>>({})
+  let eventsFor = $state<Record<string, { reason: string; message: string; type: string; age: string }[]>>({})
 
   async function refresh() {
     try {
@@ -38,6 +43,16 @@
   async function deploy() {
     deploying = true
     dResult = ''
+    const resources = {
+      requests:
+        dCpuRequest || dMemRequest
+          ? { cpu: dCpuRequest || undefined, memory: dMemRequest || undefined }
+          : undefined,
+      limits:
+        dCpuLimit || dMemLimit
+          ? { cpu: dCpuLimit || undefined, memory: dMemLimit || undefined }
+          : undefined,
+    }
     try {
       await api.deploy({
         name: dName,
@@ -45,11 +60,13 @@
         replicas: dReplicas || 1,
         port: dPort || 8080,
         session: dSession || undefined,
+        resources: resources.requests || resources.limits ? resources : undefined,
       })
       dResult = `deployed ${dName}`
       dName = ''
       dImage = ''
       dSession = ''
+      dCpuRequest = dMemRequest = dCpuLimit = dMemLimit = ''
       await refresh()
     } catch (e) {
       dResult = String(e)
@@ -64,6 +81,54 @@
       await api.deleteDeployment(name)
       delete expanded[name]
       await refresh()
+    } catch (e) {
+      error = String(e)
+    } finally {
+      busy = ''
+    }
+  }
+
+  async function restart(name: string) {
+    busy = name
+    try {
+      await api.deploymentRestart(name)
+      await refresh()
+    } catch (e) {
+      error = String(e)
+    } finally {
+      busy = ''
+    }
+  }
+
+  async function scale(name: string, replicas: number) {
+    busy = name
+    try {
+      await api.deploymentScale(name, replicas)
+      await refresh()
+    } catch (e) {
+      error = String(e)
+    } finally {
+      busy = ''
+    }
+  }
+
+  async function rollback(name: string) {
+    busy = name
+    try {
+      await api.deploymentRollback(name, 0)
+      await refresh()
+    } catch (e) {
+      error = String(e)
+    } finally {
+      busy = ''
+    }
+  }
+
+  async function showEvents(name: string) {
+    busy = name
+    try {
+      const r = await api.deploymentEvents(name)
+      eventsFor = { ...eventsFor, [name]: r.events }
     } catch (e) {
       error = String(e)
     } finally {
@@ -107,6 +172,15 @@
         <Input.Root type="number" bind:value={dReplicas} placeholder="replicas" />
         <Input.Root type="number" bind:value={dPort} placeholder="port (8080)" />
         <Input.Root class="col-span-2" placeholder="session (org:repo:bookmark, optional)" bind:value={dSession} />
+        <div class="col-span-2 mt-1">
+          <div class="mb-1 text-xs text-muted-foreground">Resources (optional, fallback to defaults)</div>
+          <div class="grid grid-cols-4 gap-2">
+            <Input.Root placeholder="cpu req" bind:value={dCpuRequest} />
+            <Input.Root placeholder="mem req" bind:value={dMemRequest} />
+            <Input.Root placeholder="cpu limit" bind:value={dCpuLimit} />
+            <Input.Root placeholder="mem limit" bind:value={dMemLimit} />
+          </div>
+        </div>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <Button.Root onclick={deploy} disabled={deploying || !dName || !dImage}>
@@ -168,17 +242,68 @@
                   <td class="py-2 pr-4 font-mono text-xs text-muted-foreground">{d.ports.join(', ')}</td>
                   <td class="py-2 pr-4 font-mono text-xs text-muted-foreground">{d.age}</td>
                   <td class="py-2 pr-4 text-right">
-                    <Button.Root
-                      variant="ghost"
-                      size="icon"
-                      disabled={busy === d.name}
-                      onclick={() => remove(d.name)}
-                      title="Delete deployment + service"
-                    >
-                      <Trash2 class="size-4 text-destructive" />
-                    </Button.Root>
+                    <div class="flex items-center justify-end gap-1">
+                      <Button.Root
+                        variant="ghost"
+                        size="icon"
+                        disabled={busy === d.name}
+                        onclick={() => restart(d.name)}
+                        title="Rolling restart"
+                      >
+                        <Rocket class="size-4" />
+                      </Button.Root>
+                      <Button.Root
+                        variant="ghost"
+                        size="icon"
+                        disabled={busy === d.name}
+                        onclick={() => scale(d.name, d.ready === d.replicas ? d.replicas + 1 : d.replicas)}
+                        title="Scale up +1"
+                      >
+                        <span class="text-xs">+1</span>
+                      </Button.Root>
+                      <Button.Root
+                        variant="ghost"
+                        size="icon"
+                        disabled={busy === d.name}
+                        onclick={() => rollback(d.name)}
+                        title="Rollback to previous revision"
+                      >
+                        <span class="text-xs">↩</span>
+                      </Button.Root>
+                      <Button.Root
+                        variant="ghost"
+                        size="icon"
+                        disabled={busy === d.name}
+                        onclick={() => showEvents(d.name)}
+                        title="Show events"
+                      >
+                        <span class="text-xs">ev</span>
+                      </Button.Root>
+                      <Button.Root
+                        variant="ghost"
+                        size="icon"
+                        disabled={busy === d.name}
+                        onclick={() => remove(d.name)}
+                        title="Delete deployment + service"
+                      >
+                        <Trash2 class="size-4 text-destructive" />
+                      </Button.Root>
+                    </div>
                   </td>
                 </tr>
+                {#if eventsFor[d.name]}
+                  <tr>
+                    <td colspan="7" class="bg-muted/30 px-4 py-2">
+                      {#each eventsFor[d.name] as ev (ev.reason + ev.message + ev.age)}
+                        <div class="flex items-start gap-2 py-0.5 font-mono text-[11px]">
+                          <span class={ev.type === 'Warning' ? 'text-destructive' : 'text-muted-foreground'}>{ev.reason}</span>
+                          <span class="flex-1 text-muted-foreground">{ev.message}</span>
+                          <span class="text-muted-foreground">{ev.age}</span>
+                        </div>
+                      {/each}
+                    </td>
+                  </tr>
+                {/if}
                 {#if expanded[d.name]}
                   <tr>
                     <td colspan="7" class="bg-muted/30 px-4 py-3">

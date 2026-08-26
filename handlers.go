@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"rucoder-agent/ops-extension/internal/k8s"
 )
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
@@ -177,12 +179,13 @@ func (s *server) sandboxWrite(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Name     string            `json:"name"`
-		Image    string            `json:"image"`
-		Replicas int32             `json:"replicas"`
-		Port     int32             `json:"port"`
-		Env      map[string]string `json:"env"`
-		Session  string            `json:"session"`
+		Name      string                `json:"name"`
+		Image     string                `json:"image"`
+		Replicas  int32                 `json:"replicas"`
+		Port      int32                 `json:"port"`
+		Env       map[string]string     `json:"env"`
+		Session   string                `json:"session"`
+		Resources *k8s.ResourceRequest  `json:"resources"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
 	if b.Name == "" || b.Image == "" {
@@ -192,7 +195,12 @@ func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 	if b.Port == 0 {
 		b.Port = 8080
 	}
-	if err := s.k8s.EnsureDeployment(r.Context(), b.Name, b.Image, b.Replicas, b.Port, b.Env, b.Session); err != nil {
+	reqs, err := b.Resources.Requirements()
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.k8s.EnsureDeployment(r.Context(), b.Name, b.Image, b.Replicas, b.Port, b.Env, b.Session, reqs); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

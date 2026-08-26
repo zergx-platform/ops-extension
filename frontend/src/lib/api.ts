@@ -42,6 +42,17 @@ export const DeploymentSchema = z.object({
   age: z.string(),
   ports: z.array(z.number()),
   session: z.string().optional(),
+  resources: ResourceRequestSchema,
+})
+
+export const ResourcePairSchema = z.object({
+  cpu: z.string().optional(),
+  memory: z.string().optional(),
+})
+
+export const ResourceRequestSchema = z.object({
+  requests: ResourcePairSchema.optional(),
+  limits: ResourcePairSchema.optional(),
 })
 
 export const PodSchema = z.object({
@@ -212,6 +223,39 @@ export const api = {
   deploymentStatus: (name: string) =>
     req(`/deployments/${enc(name)}/status`, DeploymentStatusSchema),
 
+  deploymentRestart: (name: string) =>
+    req(`/deployments/${enc(name)}/restart`, z.object({ ok: z.boolean() }), jsonInit('POST', {})),
+
+  deploymentScale: (name: string, replicas: number) =>
+    req(
+      `/deployments/${enc(name)}/scale`,
+      z.object({ ok: z.boolean(), replicas: z.number().optional() }),
+      jsonInit('POST', { replicas }),
+    ),
+
+  deploymentRollback: (name: string, revision = 0) =>
+    req(
+      `/deployments/${enc(name)}/rollback`,
+      z.object({ ok: z.boolean() }),
+      jsonInit('POST', { revision }),
+    ),
+
+  deploymentEvents: (name: string) =>
+    req(
+      `/deployments/${enc(name)}/events`,
+      z.object({ events: z.array(z.object({ reason: z.string(), message: z.string(), type: z.string(), age: z.string() })) }),
+    ),
+
+  deploymentRevisions: (name: string) =>
+    req(
+      `/deployments/${enc(name)}/revisions`,
+      z.object({
+        revisions: z.array(
+          z.object({ revision: z.number(), image: z.string(), replicas: z.number(), ready: z.number(), age: z.string() }),
+        ),
+      }),
+    ),
+
   deploy: (b: {
     name: string
     image: string
@@ -219,6 +263,10 @@ export const api = {
     port?: number
     env?: Record<string, string>
     session?: string
+    resources?: {
+      requests?: { cpu?: string; memory?: string }
+      limits?: { cpu?: string; memory?: string }
+    }
   }) =>
     req(
       '/deployments',

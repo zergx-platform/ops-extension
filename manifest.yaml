@@ -7,13 +7,13 @@ lifecycle: [deleted]
 variables:
   - name: sandbox-id
     scope: session
-    description: 会话沙箱容器 ID
+    description: Container ID of the session sandbox.
   - name: worker-url
     scope: session
-    description: 会话沙箱 worker 的 WebSocket 地址
+    description: WebSocket URL of the session sandbox worker.
   - name: sandbox-status
     scope: session
-    description: 会话沙箱状态
+    description: Status of the session sandbox.
 tools:
   - name: sandbox-run
     description: Run a shell command in the session sandbox. The workspace is synced to the repo bookmark head first (repo files refreshed; sandbox-only files kept).
@@ -107,12 +107,25 @@ tools:
         no_cache: { type: boolean }
       required: [dockerfile_path, tag]
   - name: container-deploy
-    description: Deploy a container image as a Kubernetes deployment.
+    description: Deploy a container image as a Kubernetes deployment (with optional nested resource requests/limits).
     input_schema:
       type: object
       properties:
         image: { type: string }
         name: { type: string }
+        resources:
+          type: object
+          properties:
+            requests:
+              type: object
+              properties:
+                cpu: { type: string }
+                memory: { type: string }
+            limits:
+              type: object
+              properties:
+                cpu: { type: string }
+                memory: { type: string }
       required: [image]
   - name: image-list
     description: List container images in the OCI registry.
@@ -120,7 +133,7 @@ tools:
       type: object
       properties: {}
   - name: package-publish
-    description: Publish the repo checkout as a package. Runs the protocol's official CLI inside a containerfile build (buildkit, no image export). Protocols: npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift. Manifest-driven protocols (npm/pypi/cargo/...) read name+version from the package manifest; go/hex/composer/maven/swift/generic need explicit name+version (+file for generic).
+    description: "Publish the repo checkout as a package. Runs the protocol's official CLI inside a containerfile build (buildkit, no image export). Protocols: npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift. Manifest-driven protocols (npm/pypi/cargo/...) read name+version from the package manifest; go/hex/composer/maven/swift/generic need explicit name+version (+file for generic)."
     input_schema:
       type: object
       properties:

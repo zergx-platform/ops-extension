@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -721,6 +723,182 @@ func (m *Manager) DeleteDeployment(ctx context.Context, name string) error {
 	return nil
 }
 
+// RestartDeployment triggers a rolling restart by bumping the
+// `kubectl.kubernetes.io/restartedAt` annotation on the pod template — the
+// same mechanism `kubectl rollout restart` uses.
+func (m *Manager) RestartDeployment(ctx context.Context, name string) error {
+	deps := m.client.AppsV1().Deployments(m.config.Namespace)
+	d, err := deps.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if d.Spec.Template.Annotations == nil {
+		d.Spec.Template.Annotations = map[string]string{}
+	}
+	d.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().UTC().Format(time.RFC3339)
+	_, err = deps.Update(ctx, d, metav1.UpdateOptions{})
+	return err
+}
+
+// ScaleDeployment sets the replica count of a deployment.
+func (m *Manager) ScaleDeployment(ctx context.Context, name string, replicas int32) error {
+	if replicas < 0 {
+		return fmt.Errorf("replicas must be >= 0")
+	}
+	deps := m.client.AppsV1().Deployments(m.config.Namespace)
+	d, err := deps.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	d.Spec.Replicas = &replicas
+	_, err = deps.Update(ctx, d, metav1.UpdateOptions{})
+	return err
+}
+
+// RollbackDeployment rolls a deployment back to a previous revision by
+// replaying the stored ReplicaSet template (revision 0 = previous revision).
+// Requires RevisionHistoryLimit > 0 (EnsureDeployment sets 10).
+func (m *Manager) RollbackDeployment(ctx context.Context, name string, revision int64) error {
+	rsList, err := m.client.AppsV1().ReplicaSets(m.config.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=" + name,
+	})
+	if err != nil {
+		return err
+	}
+
+	rsRevision := func(rs *appsv1.ReplicaSet) int64 {
+		if rs.Annotations == nil {
+			return 0
+		}
+		rev, _ := strconv.ParseInt(rs.Annotations["deployment.kubernetes.io/revision"], 10, 64)
+		return rev
+	}
+
+	var target *appsv1.ReplicaSet
+	switch {
+	case revision > 0:
+		for i := range rsList.Items {
+			if rsRevision(&rsList.Items[i]) == revision {
+				target = &rsList.Items[i]
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("revision %d not found", revision)
+		}
+	case revision == 0:
+		d, err := m.client.AppsV1().Deployments(m.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		curRevision := int64(0)
+		if d.Annotations != nil {
+			curRevision, _ = strconv.ParseInt(d.Annotations["deployment.kubernetes.io/revision"], 10, 64)
+		}
+		best := int64(-1)
+		for i := range rsList.Items {
+			rev := rsRevision(&rsList.Items[i])
+			if rev < curRevision && rev > best {
+				best = rev
+				target = &rsList.Items[i]
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("no previous revision to roll back to")
+		}
+	default:
+		return fmt.Errorf("revision must be >= 0")
+	}
+
+	// Replay the target ReplicaSet's template into the deployment.
+	d, err := m.client.AppsV1().Deployments(m.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	d.Spec.Template = *target.Spec.Template.DeepCopy()
+	// Preserve the owned labels (selector must stay stable).
+	if d.Spec.Template.Labels == nil {
+		d.Spec.Template.Labels = map[string]string{}
+	}
+	d.Spec.Template.Labels["app"] = name
+	_, err = m.client.AppsV1().Deployments(m.config.Namespace).Update(ctx, d, metav1.UpdateOptions{})
+	return err
+}
+
+// DeploymentEvent is a k8s Event associated with a deployment's rollout.
+type DeploymentEvent struct {
+	Reason  string
+	Message string
+	Type    string
+	Age     string
+}
+
+// DeploymentEvents lists events for a deployment's pods and ReplicaSets (the
+// "why is my rollout stuck" view).
+func (m *Manager) DeploymentEvents(ctx context.Context, name string) ([]DeploymentEvent, error) {
+	events, err := m.client.CoreV1().Events(m.config.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := []DeploymentEvent{}
+	for _, e := range events.Items {
+		// Involved object is either the deployment, one of its ReplicaSets
+		// (name prefixed by the deployment name), or one of its pods (RS name
+		// prefix). Filter heuristically on the name prefix.
+		obj := e.InvolvedObject.Name
+		if obj == name || strings.HasPrefix(obj, name+"-") {
+			out = append(out, DeploymentEvent{
+				Reason:  e.Reason,
+				Message: e.Message,
+				Type:    e.Type,
+				Age:     formatAge(e.LastTimestamp.Time),
+			})
+		}
+	}
+	return out, nil
+}
+
+// DeploymentRevisions lists the ReplicaSet revisions of a deployment,
+// newest-first.
+func (m *Manager) DeploymentRevisions(ctx context.Context, name string) ([]DeploymentRevision, error) {
+	rsList, err := m.client.AppsV1().ReplicaSets(m.config.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=" + name,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := []DeploymentRevision{}
+	for i := range rsList.Items {
+		rs := &rsList.Items[i]
+		rev := int64(0)
+		if rs.Annotations != nil {
+			rev, _ = strconv.ParseInt(rs.Annotations["deployment.kubernetes.io/revision"], 10, 64)
+		}
+		img := ""
+		if len(rs.Spec.Template.Spec.Containers) > 0 {
+			img = rs.Spec.Template.Spec.Containers[0].Image
+		}
+		out = append(out, DeploymentRevision{
+			Revision: rev,
+			Image:    img,
+			Replicas: rs.Status.Replicas,
+			Ready:    rs.Status.ReadyReplicas,
+			Age:      formatAge(rs.CreationTimestamp.Time),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Revision > out[j].Revision })
+	return out, nil
+}
+
+// DeploymentRevision is one ReplicaSet revision of a deployment.
+type DeploymentRevision struct {
+	Revision int64
+	Image    string
+	Replicas int32
+	Ready    int32
+	Age      string
+}
+
 func formatAge(t time.Time) string {
 	d := time.Since(t)
 	switch {
@@ -739,6 +917,8 @@ func max(a, b int32) int32 {
 	}
 	return b
 }
+
+func ptrInt32(v int32) *int32 { return &v }
 
 func orDefault(v, def string) string {
 	if v == "" {

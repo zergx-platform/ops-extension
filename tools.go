@@ -8,6 +8,7 @@ import (
 
 	abep "abep.dev/sdk"
 
+	"rucoder-agent/ops-extension/internal/k8s"
 	"rucoder-agent/ops-extension/internal/worker"
 )
 
@@ -252,7 +253,12 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					}
 					session = org + ":" + strArg(args, "repo") + ":" + bm
 				}
-				if err := s.k8s.EnsureDeployment(ctx, name, image, 1, 8080, nil, session); err != nil {
+				rr := resourceRequestFromArgs(args)
+				reqs, err := rr.Requirements()
+				if err != nil {
+					return "", nil, fmt.Errorf("container-deploy failed: %w", err)
+				}
+				if err := s.k8s.EnsureDeployment(ctx, name, image, 1, 8080, nil, session, reqs); err != nil {
 					return "", nil, fmt.Errorf("container-deploy failed: %w", err)
 				}
 				return fmt.Sprintf("Deployed '%s' from %s.", name, image), nil, nil
@@ -465,4 +471,27 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 // and returns the repository names.
 func (s *server) imageList(ctx context.Context) (string, error) {
 	return s.httpGetJSON(ctx, s.artifact+"/v2/_catalog")
+}
+
+// resourceRequestFromArgs extracts the nested resources arg (if any) from a
+// tool argument map, tolerant of missing/malformed entries.
+func resourceRequestFromArgs(args map[string]interface{}) k8s.ResourceRequest {
+	var rr k8s.ResourceRequest
+	raw, ok := args["resources"].(map[string]interface{})
+	if !ok {
+		return rr
+	}
+	if reqs, ok := raw["requests"].(map[string]interface{}); ok {
+		rr.Requests = &k8s.ResourcePair{
+			CPU:    strArg(reqs, "cpu"),
+			Memory: strArg(reqs, "memory"),
+		}
+	}
+	if limits, ok := raw["limits"].(map[string]interface{}); ok {
+		rr.Limits = &k8s.ResourcePair{
+			CPU:    strArg(limits, "cpu"),
+			Memory: strArg(limits, "memory"),
+		}
+	}
+	return rr
 }

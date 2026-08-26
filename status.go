@@ -201,6 +201,86 @@ func (s *server) deploymentDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }
 
+// deploymentRestart triggers a rolling restart (bumps the restartedAt
+// annotation on the pod template).
+func (s *server) deploymentRestart(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if err := s.k8s.RestartDeployment(r.Context(), name); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+}
+
+// deploymentScale sets the replica count.
+func (s *server) deploymentScale(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	var b struct {
+		Replicas int32 `json:"replicas"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&b)
+	if err := s.k8s.ScaleDeployment(r.Context(), name, b.Replicas); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "replicas": b.Replicas})
+}
+
+// deploymentRollback rolls back to a previous revision (0 = previous).
+func (s *server) deploymentRollback(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	var b struct {
+		Revision int64 `json:"revision"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&b)
+	if err := s.k8s.RollbackDeployment(r.Context(), name, b.Revision); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+}
+
+// deploymentEvents lists k8s events for a deployment (rollout debugging).
+func (s *server) deploymentEvents(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	events, err := s.k8s.DeploymentEvents(r.Context(), name)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := []map[string]interface{}{}
+	for _, e := range events {
+		out = append(out, map[string]interface{}{
+			"reason":  e.Reason,
+			"message": e.Message,
+			"type":    e.Type,
+			"age":     e.Age,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"events": out})
+}
+
+// deploymentRevisions lists the ReplicaSet revisions of a deployment.
+func (s *server) deploymentRevisions(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	revs, err := s.k8s.DeploymentRevisions(r.Context(), name)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := []map[string]interface{}{}
+	for _, r := range revs {
+		out = append(out, map[string]interface{}{
+			"revision": r.Revision,
+			"image":    r.Image,
+			"replicas": r.Replicas,
+			"ready":    r.Ready,
+			"age":      r.Age,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"revisions": out})
+}
+
 // packagesList proxies the artifact registry's package list (avoids CORS and
 // keeps the artifact URL internal to the cluster).
 func (s *server) packagesList(w http.ResponseWriter, r *http.Request) {
