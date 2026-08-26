@@ -118,6 +118,7 @@ func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
 			"age":       d.Age,
 			"ports":     d.Ports,
 			"session":   d.Session,
+			"resources": d.Resources,
 		})
 	}
 
@@ -145,6 +146,7 @@ func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
 			"age":       d.Age,
 			"ports":     d.Ports,
 			"session":   d.Session,
+			"resources": d.Resources,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"deployments": out})
