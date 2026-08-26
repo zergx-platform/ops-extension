@@ -33,6 +33,21 @@ func (s *server) resolveSandboxStatus(ctx context.Context, sessionName string) (
 	return info.Status, nil
 }
 
+// resolveSandboxID is the authoritative lazy resolver for `vars.ops.sandbox-id`.
+// Same k8s source of truth as sandbox-status; the KV projection in
+// publishSandboxVars is just a cache.
+func (s *server) resolveSandboxID(ctx context.Context, sessionName string) (string, error) {
+	key := sessionKey(sessionName)
+	info, err := s.k8s.FindContainer(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if info.ContainerID == "" {
+		return "not-created", nil
+	}
+	return info.ContainerID, nil
+}
+
 // clearSandboxVars removes a session's projected sandbox variables.
 func (s *server) clearSandboxVars(ctx context.Context, sessionName string) {
 	if s.ext == nil {

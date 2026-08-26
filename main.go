@@ -8,9 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 
 	abep "abep.dev/sdk"
 	natsbus "abep.dev/sdk/nats"
@@ -108,31 +106,51 @@ func main() {
 			slog.Error("load manifest failed", "svc", "ops-extension", "err", err)
 			os.Exit(1)
 		}
-		ext := abep.NewExtension(nbus, manifest.Config(
-			s.handlers(),
-			map[string]abep.VariableSpec{
-				"sandbox-status": {Resolve: s.resolveSandboxStatus},
+
+		r := s.router(toolBridge)
+
+		if err := abep.Serve(
+			nbus,
+			manifest.Config(
+				s.handlers(),
+				map[string]abep.VariableSpec{
+					"sandbox-id":     {Resolve: s.resolveSandboxID},
+					"sandbox-status": {Resolve: s.resolveSandboxStatus},
+				},
+				func(ctx context.Context, ev abep.LifecycleEvent) error {
+					if ev.Kind == "deleted" {
+						s.clearSandboxVars(ctx, ev.SessionName)
+					}
+					return nil
+				},
+			),
+			abep.ServeOptions{
+				Handler: r,
+				Port:    port,
+				Run: func(runCtx context.Context, ext *abep.Extension) {
+					s.ext = ext
+					slog.Info("listening", "svc", "ops-extension", "addr", ":"+port, "buildkit", buildkitAddr, "artifact", artifact, "jj", jj)
+				},
 			},
-			func(ctx context.Context, ev abep.LifecycleEvent) error {
-				if ev.Kind == "deleted" {
-					s.clearSandboxVars(ctx, ev.SessionName)
-				}
-				return nil
-			},
-		))
-		s.ext = ext
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		go func() {
-			if err := ext.Serve(ctx); err != nil {
-				slog.Error("extension serve failed", "svc", "ops-extension", "err", err)
-			}
-		}()
-		defer ext.Close()
-	} else {
-		toolBridge = true
+		); err != nil {
+			slog.Error("serve failed", "svc", "ops-extension", "err", err)
+			os.Exit(1)
+		}
+		return
 	}
 
+	r := s.router(true)
+	addr := ":" + port
+	slog.Info("listening", "svc", "ops-extension", "addr", addr, "buildkit", buildkitAddr, "artifact", artifact, "jj", jj)
+	if err := http.ListenAndServe(addr, r); err != nil {
+		slog.Error("http server failed", "svc", "ops-extension", "err", err)
+		os.Exit(1)
+	}
+}
+
+// router builds the chi router serving both the ops API and the embedded SPA.
+// `toolBridge` exposes the NATS tools over HTTP for verification instances.
+func (s *server) router(toolBridge bool) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Route("/api/v1", func(r chi.Router) {
@@ -184,13 +202,7 @@ func main() {
 
 	// Embedded SPA (served at /; /api/v1 routes registered above win).
 	r.Handle("/*", spaHandler())
-
-	addr := ":" + port
-	slog.Info("listening", "svc", "ops-extension", "addr", addr, "buildkit", buildkitAddr, "artifact", artifact, "jj", jj)
-	if err := http.ListenAndServe(addr, r); err != nil {
-		slog.Error("http server failed", "svc", "ops-extension", "err", err)
-		os.Exit(1)
-	}
+	return r
 }
 
 // callTool bridges a NATS tool over HTTP for verification instances
