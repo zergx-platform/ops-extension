@@ -128,6 +128,7 @@ func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{},
 	if err != nil {
 		return sandboxCtx{}, fmt.Errorf("ensure container for %s: %w", sid, err)
 	}
+	s.publishSandboxVars(ctx, sid, info)
 	sc := sandboxCtx{session: sid, cid: info.ContainerID, ws: ws}
 	if needSync {
 		if err := s.ensureSynced(ctx, sc.cid, ws); err != nil {
