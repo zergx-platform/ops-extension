@@ -131,6 +131,17 @@ export const BuildSchema = z.object({
   log_lines: z.number(),
 })
 
+export const HelmReleaseSchema = z.object({
+  name: z.string(),
+  namespace: z.string(),
+  version: z.number(),
+  status: z.string(),
+  description: z.string().optional(),
+  chart: z.string(),
+  chart_version: z.string(),
+  app_version: z.string(),
+})
+
 // ---------- inferred types ----------
 
 export type Status = z.infer<typeof StatusSchema>
@@ -143,6 +154,7 @@ export type ExecResult = z.infer<typeof ExecResultSchema>
 export type Pkg = z.infer<typeof PkgSchema>
 export type PublishSpec = z.infer<typeof PublishSpecSchema>
 export type Template = z.infer<typeof TemplateSchema>
+export type HelmRelease = z.infer<typeof HelmReleaseSchema>
 export type Build = z.infer<typeof BuildSchema>
 
 // ---------- fetch plumbing ----------
@@ -255,6 +267,33 @@ export const api = {
         ),
       }),
     ),
+
+  helmReleases: () =>
+    req('/helm/releases', z.object({ releases: z.array(HelmReleaseSchema) })),
+
+  helmStatus: (name: string) =>
+    req(`/helm/releases/${enc(name)}/status`, z.object({ release: HelmReleaseSchema })),
+
+  helmValues: (name: string) =>
+    req(`/helm/releases/${enc(name)}/values`, z.object({ values: z.record(z.string(), z.unknown()) })),
+
+  helmInstall: (b: {
+    release_name: string
+    chart?: string
+    version?: string
+    values?: Record<string, unknown>
+    org?: string
+    repo?: string
+    bookmark?: string
+    chart_path?: string
+  }) =>
+    req('/helm/install', z.object({ ok: z.boolean(), build_id: z.string().optional(), error: z.string().optional() }), jsonInit('POST', b)),
+
+  helmUninstall: (name: string) =>
+    req(`/helm/releases/${enc(name)}`, z.object({ ok: z.boolean() }), { method: 'DELETE' }),
+
+  helmRollback: (name: string, revision = 0) =>
+    req(`/helm/releases/${enc(name)}/rollback`, z.object({ ok: z.boolean() }), jsonInit('POST', { revision })),
 
   deploy: (b: {
     name: string

@@ -4,16 +4,18 @@
   import Sandboxes from './pages/Sandboxes.svelte'
   import Sandbox from './pages/Sandbox.svelte'
   import Deployments from './pages/Deployments.svelte'
+  import Helm from './pages/Helm.svelte'
   import Builds from './pages/Builds.svelte'
   import Packages from './pages/Packages.svelte'
   import Tools from './pages/Tools.svelte'
-  import { Activity, Boxes, Terminal, Rocket, Hammer, Package, Wrench } from '@lucide/svelte'
+  import { Activity, Boxes, Terminal, Rocket, Hammer, Package, Wrench, Layers } from '@lucide/svelte'
 
   const links = [
     { href: '#/', label: 'Overview', icon: Activity, page: Overview },
     { href: '#/sandboxes', label: 'Sandboxes', icon: Boxes, page: Sandboxes },
     { href: '#/sandbox', label: 'Sandbox', icon: Terminal, page: Sandbox },
     { href: '#/deployments', label: 'Deployments', icon: Rocket, page: Deployments },
+    { href: '#/helm', label: 'Helm', icon: Layers, page: Helm },
     { href: '#/builds', label: 'Builds', icon: Hammer, page: Builds },
     { href: '#/packages', label: 'Packages', icon: Package, page: Packages },
     { href: '#/tools', label: 'Tools', icon: Wrench, page: Tools },
