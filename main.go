@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -71,7 +72,8 @@ func main() {
 		MemoryLimit:   envOr("RUCODER_WORKER_MEM_LIMIT", ""),
 	})
 	if err != nil {
-		panic(fmt.Sprintf("k8s: %v", err))
+		slog.Error("k8s manager init failed", "svc", "ops-extension", "err", err)
+		os.Exit(1)
 	}
 
 	s := &server{
@@ -94,7 +96,8 @@ func main() {
 	if os.Getenv("RUCODER_DISABLE_NATS") != "1" {
 		nbus, err := natsbus.Connect(natsURL)
 		if err != nil {
-			panic(fmt.Sprintf("extension: %v", err))
+			slog.Error("nats connect failed", "svc", "ops-extension", "err", err)
+			os.Exit(1)
 		}
 		ext := abep.NewExtension(nbus, abep.Config{
 			ID:      "ops",
@@ -118,7 +121,7 @@ func main() {
 		defer stop()
 		go func() {
 			if err := ext.Serve(ctx); err != nil {
-				fmt.Printf("[ops-extension] serve: %v\n", err)
+				slog.Error("extension serve failed", "svc", "ops-extension", "err", err)
 			}
 		}()
 		defer ext.Close()
@@ -168,9 +171,10 @@ func main() {
 	r.Handle("/*", spaHandler())
 
 	addr := ":" + port
-	fmt.Printf("[ops-extension] listening on %s (buildkit=%s artifact=%s jj=%s)\n", addr, buildkitAddr, artifact, jj)
+	slog.Info("listening", "svc", "ops-extension", "addr", addr, "buildkit", buildkitAddr, "artifact", artifact, "jj", jj)
 	if err := http.ListenAndServe(addr, r); err != nil {
-		panic(err)
+		slog.Error("http server failed", "svc", "ops-extension", "err", err)
+		os.Exit(1)
 	}
 }
 
