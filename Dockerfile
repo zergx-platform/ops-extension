@@ -43,4 +43,5 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/ops-extension .
 
 FROM scratch
 COPY --from=build /out/ops-extension /ops-extension
+COPY --from=build /src/manifest.yaml /manifest.yaml
 ENTRYPOINT ["/ops-extension"]
