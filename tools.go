@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,7 +25,7 @@ import (
 func (s *server) handlers() map[string]abep.ToolSpec {
 	return map[string]abep.ToolSpec{
 		"sandbox-run": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, emit func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				command := strArg(args, "command")
 				if command == "" {
 					return "", nil, fmt.Errorf("sandbox-run: missing 'command'")
@@ -62,14 +63,18 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					}
 				}
 
-				// Sync-wait the job output up to timeout_ms (default 10s). The
-				// worker always registers a backgrounded job; StreamJobOutput
-				// replays history then streams live deltas until job.completed.
+				// Sync-wait the job up to timeout_ms (default 10s). The worker
+				// always registers a backgrounded job; the per-job SSE stream
+				// replays history then streams live output until job.completed.
+				// The bus is model-facing and carries no streamed deltas, so
+				// the terminal tool result folds the captured output in; the
+				// UI reads live output via the gateway's per-worker SSE proxy.
 				timeoutMs := int(abep.ArgInt(args, "timeout_ms", 10000))
 				if timeoutMs <= 0 {
 					timeoutMs = 10000
 				}
 				streamCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+				defer cancel()
 
 				type streamResult struct {
 					done worker.JobDone
@@ -77,14 +82,13 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				}
 				resultCh := make(chan streamResult, 1)
 				go func() {
-					done, err := worker.StreamJobOutput(streamCtx, workerURL, res.JobID, emit)
+					done, err := worker.StreamJobOutput(streamCtx, workerURL, res.JobID, nil)
 					resultCh <- streamResult{done: done, err: err}
 				}()
 
 				select {
 				case sr := <-resultCh:
-					cancel()
-					if sr.err != nil {
+					if sr.err != nil && !errors.Is(sr.err, context.DeadlineExceeded) {
 						return "", nil, fmt.Errorf("sandbox-run stream failed: %w", sr.err)
 					}
 					content := fmt.Sprintf("Command completed (job %s, exit %d)", res.JobID, sr.done.ExitCode)
@@ -105,12 +109,11 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					// immediately. The watcher keeps the SSE stream open until
 					// completion, then notifies the agent via the session
 					// mailbox (payload.content is folded into the chat).
-					cancel()
 					if s.ext != nil {
 						go func(jobID, sid string) {
 							bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Minute)
 							defer bgCancel()
-							done, _ := worker.StreamJobOutput(bgCtx, workerURL, jobID, func(string) {})
+							done, _ := worker.StreamJobOutput(bgCtx, workerURL, jobID, nil)
 							msg := fmt.Sprintf("Background command finished (job %s, exit %d)", jobID, done.ExitCode)
 							if done.Stdout != "" {
 								msg += "\n" + done.Stdout
@@ -133,7 +136,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-read": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				path := strArg(args, "path")
 				sc, err := s.ensureSandbox(ctx, args, sessionName, true)
 				if err != nil {
@@ -147,7 +150,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-write": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				path := strArg(args, "path")
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
@@ -160,7 +163,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-edit": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				path := strArg(args, "path")
 				startLine := intArg64(args, "start_line", 0)
 				endLine := intArg64(args, "end_line", 0)
@@ -174,7 +177,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-job-list": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
@@ -187,7 +190,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-job-output": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
@@ -200,7 +203,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-job-wait": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
@@ -213,7 +216,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-job-stdin": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
@@ -229,7 +232,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-job-kill": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
@@ -244,7 +247,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-port": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
@@ -259,7 +262,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"container-build": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
 				if err != nil {
 					return "", nil, err
@@ -288,7 +291,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"container-deploy": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				image := strArg(args, "image")
 				name := strArg(args, "name")
 				if name == "" {
@@ -318,13 +321,13 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"image-list": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				v, err := s.imageList(ctx)
 				return v, nil, err
 			},
 		},
 		"helm-install": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				release := strArg(args, "release_name")
 				if release == "" {
 					return "", nil, fmt.Errorf("helm-install: missing 'release_name'")
@@ -357,13 +360,13 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"helm-list": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				v, err := s.httpGetJSON(ctx, selfBase()+"/api/v1/helm/releases")
 				return v, nil, err
 			},
 		},
 		"helm-status": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				name := strArg(args, "release_name")
 				if name == "" {
 					return "", nil, fmt.Errorf("helm-status: missing 'release_name'")
@@ -373,7 +376,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"helm-uninstall": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				name := strArg(args, "release_name")
 				if name == "" {
 					return "", nil, fmt.Errorf("helm-uninstall: missing 'release_name'")
@@ -395,7 +398,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"package-publish": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				protocol := strArg(args, "protocol")
 				// Explicit org/repo win; else resolve the session workspace.
 				org, repo, bookmark := strArg(args, "org"), strArg(args, "repo"), strArg(args, "bookmark")
@@ -418,18 +421,18 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			},
 		},
 		"list-registry-packages": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				v, err := s.httpGetJSON(ctx, s.artifact+"/pkgs/system/packages")
 				return v, nil, err
 			},
 		},
 		"list-containerfile-templates": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				return toJSON(builtinTemplates()), nil, nil
 			},
 		},
 		"pull-git-repo": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				gitURL := strArg(args, "git_url")
 				if gitURL == "" {
 					return "", nil, fmt.Errorf("pull-git-repo: missing 'git_url'")

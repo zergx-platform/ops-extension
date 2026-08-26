@@ -219,7 +219,7 @@ func (s *server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid args body: "+err.Error())
 		return
 	}
-	out, _, err := spec.Execute(r.Context(), args, "http-verify", "", func(string) {})
+	out, _, err := spec.Execute(r.Context(), args, "http-verify", "")
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

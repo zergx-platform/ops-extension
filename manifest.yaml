@@ -14,7 +14,6 @@ variables:
 tools:
   - name: sandbox-run
     description: Run a shell command in the session sandbox. The workspace is synced to the repo bookmark head first (repo files refreshed; sandbox-only files kept).
-    streaming: true
     input_schema:
       type: object
       properties:

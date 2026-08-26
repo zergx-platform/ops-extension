@@ -41,6 +41,12 @@ func CommandOnce(ctx context.Context, wsURL, method string, params map[string]in
 		if err := conn.ReadJSON(&v); err != nil {
 			return nil, fmt.Errorf("ws recv: %w", err)
 		}
+		// Server-push events (job.output / job.completed) are broadcast on the
+		// same socket without an id; skip them and keep waiting for the RPC
+		// reply carrying our id.
+		if _, isEvent := v["event"]; isEvent {
+			continue
+		}
 		if vid, ok := v["id"].(float64); ok && uint64(vid) == id {
 			if e, ok := v["error"].(string); ok && e != "" {
 				return nil, fmt.Errorf("%s", e)
@@ -81,7 +87,9 @@ func Execute(ctx context.Context, wsURL, command, rev string) (ExecuteResult, er
 
 // StreamJobOutput opens the worker's per-job SSE stream (/ws/job?job_id=…)
 // and invokes onOutput for every job.output event until job.completed arrives
-// or ctx is done. Returns the completion event (exit_code, tails).
+// or ctx is done. Returns the completion event (exit_code, tails). onOutput
+// may be nil — the bus carries no tool deltas, so callers that only need the
+// terminal result pass nil and read the completion tails from JobDone.
 type JobDone struct {
 	ExitCode int
 	Stdout   string
@@ -122,7 +130,7 @@ func StreamJobOutput(ctx context.Context, workerURL, jobID string, onOutput func
 				var ev struct {
 					Content string `json:"content"`
 				}
-				if json.Unmarshal([]byte(payload), &ev) == nil {
+				if json.Unmarshal([]byte(payload), &ev) == nil && onOutput != nil {
 					fmt.Printf("[worker] job.output %q\n", ev.Content)
 					onOutput(ev.Content)
 				}
