@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -20,6 +21,9 @@ import (
 	"rucoder-agent/ops-extension/internal/k8s"
 	"rucoder-agent/ops-extension/internal/worker"
 )
+
+//go:embed manifest.yaml
+var manifestYaml []byte
 
 type server struct {
 	k8s               *k8s.Manager
@@ -99,7 +103,7 @@ func main() {
 			slog.Error("nats connect failed", "svc", "ops-extension", "err", err)
 			os.Exit(1)
 		}
-		manifest, err := abep.LoadManifest("manifest.yaml")
+		manifest, err := abep.ParseManifest(manifestYaml)
 		if err != nil {
 			slog.Error("load manifest failed", "svc", "ops-extension", "err", err)
 			os.Exit(1)
@@ -163,6 +167,12 @@ func main() {
 		r.Get("/deployments/{name}/events", s.deploymentEvents)
 		r.Get("/deployments/{name}/revisions", s.deploymentRevisions)
 		r.Delete("/deployments/{name}", s.deploymentDelete)
+		r.Post("/helm/install", s.helmInstall)
+		r.Get("/helm/releases", s.helmList)
+		r.Get("/helm/releases/{name}/status", s.helmStatus)
+		r.Get("/helm/releases/{name}/values", s.helmValues)
+		r.Post("/helm/releases/{name}/rollback", s.helmRollback)
+		r.Delete("/helm/releases/{name}", s.helmUninstall)
 		r.Get("/packages", s.packagesList)
 		r.Get("/images", s.imagesList)
 		r.Get("/publish-specs", s.publishSpecsHandler)
