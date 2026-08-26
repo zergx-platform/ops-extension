@@ -34,21 +34,11 @@ type wsCacheEntry struct {
 	expires time.Time
 }
 
-// resolveWorkspace maps a tool call to its workspace. Priority: `_session`
-// ("org:repo:bookmark", verified against jj-server) → the first-class
-// `session_name` envelope field (same verification) → legacy `_org`/`_repo`/
-// `_branch` args. ops-extension talks to jj-server only — no repo-extension,
-// no mapping table.
+// resolveWorkspace maps a tool call to its workspace. Priority: the
+// first-class `session_name` envelope field ("org:repo:bookmark", verified
+// against jj-server) → legacy `_org`/`_repo`/`_branch` args. ops-extension
+// talks to jj-server only — no repo-extension, no mapping table.
 func (s *server) resolveWorkspace(ctx context.Context, args map[string]interface{}, sessionName string) (workspace, string, error) {
-	if sid := strArg(args, "_session"); sid != "" {
-		org, repo, bm, ok := parseSessionName(sid)
-		if !ok {
-			return workspace{}, "", fmt.Errorf(
-				"session %q is not named org:repo:bookmark — cannot resolve its workspace (rename the session or pass _org/_repo/_branch explicitly)", sid)
-		}
-		ws, err := s.lookupWorkspace(ctx, sid, org, repo, bm)
-		return ws, sid, err
-	}
 	if sessionName != "" {
 		org, repo, bm, ok := parseSessionName(sessionName)
 		if !ok {
@@ -60,7 +50,7 @@ func (s *server) resolveWorkspace(ctx context.Context, args map[string]interface
 	}
 	org, repo, bm := strArg(args, "_org"), strArg(args, "_repo"), strArg(args, "_branch")
 	if org == "" || repo == "" {
-		return workspace{}, "", fmt.Errorf("missing session context (pass _session, or _org/_repo)")
+		return workspace{}, "", fmt.Errorf("missing session context (pass session_name, or _org/_repo)")
 	}
 	if bm == "" {
 		bm = "main"

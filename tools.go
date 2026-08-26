@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	abep "abep.dev/sdk"
 
@@ -61,24 +62,74 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					}
 				}
 
-				// Every command is a streamed job: subscribe to the per-job SSE
-				// stream, emit output as deltas, and return a natural-language
-				// final once completed.
-				done, err := worker.StreamJobOutput(ctx, workerURL, res.JobID, emit)
-				if err != nil {
-					return "", nil, fmt.Errorf("sandbox-run stream failed: %w", err)
+				// Sync-wait the job output up to timeout_ms (default 10s). The
+				// worker always registers a backgrounded job; StreamJobOutput
+				// replays history then streams live deltas until job.completed.
+				timeoutMs := int(abep.ArgInt(args, "timeout_ms", 10000))
+				if timeoutMs <= 0 {
+					timeoutMs = 10000
 				}
-				content := fmt.Sprintf("命令执行完成（job %s, exit %d）", res.JobID, done.ExitCode)
-				if done.Stdout != "" {
-					content += "\n" + done.Stdout
+				streamCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+
+				type streamResult struct {
+					done worker.JobDone
+					err  error
 				}
-				if done.Stderr != "" {
-					content += "\n[stderr]\n" + done.Stderr
+				resultCh := make(chan streamResult, 1)
+				go func() {
+					done, err := worker.StreamJobOutput(streamCtx, workerURL, res.JobID, emit)
+					resultCh <- streamResult{done: done, err: err}
+				}()
+
+				select {
+				case sr := <-resultCh:
+					cancel()
+					if sr.err != nil {
+						return "", nil, fmt.Errorf("sandbox-run stream failed: %w", sr.err)
+					}
+					content := fmt.Sprintf("Command completed (job %s, exit %d)", res.JobID, sr.done.ExitCode)
+					if sr.done.Stdout != "" {
+						content += "\n" + sr.done.Stdout
+					}
+					if sr.done.Stderr != "" {
+						content += "\n[stderr]\n" + sr.done.Stderr
+					}
+					return content, map[string]interface{}{
+						"job_id":       res.JobID,
+						"exit_code":    sr.done.ExitCode,
+						"backgrounded": false,
+					}, nil
+
+				case <-streamCtx.Done():
+					// Timed out: hand the job to a background watcher and return
+					// immediately. The watcher keeps the SSE stream open until
+					// completion, then notifies the agent via the session
+					// mailbox (payload.content is folded into the chat).
+					cancel()
+					if s.ext != nil {
+						go func(jobID, sid string) {
+							bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+							defer bgCancel()
+							done, _ := worker.StreamJobOutput(bgCtx, workerURL, jobID, func(string) {})
+							msg := fmt.Sprintf("Background command finished (job %s, exit %d)", jobID, done.ExitCode)
+							if done.Stdout != "" {
+								msg += "\n" + done.Stdout
+							}
+							if done.Stderr != "" {
+								msg += "\n[stderr]\n" + done.Stderr
+							}
+							_ = s.ext.PublishMailboxEvent(context.Background(), sid, "event",
+								map[string]interface{}{"content": msg})
+						}(res.JobID, sessionName)
+					}
+					content := fmt.Sprintf(
+						"Command is still running in the background (job %s); it did not finish within %dms. It keeps running in the background and you will be notified on completion. Meanwhile you can inspect current output with sandbox-job-output, or stop it with sandbox-job-kill.",
+						res.JobID, timeoutMs)
+					return content, map[string]interface{}{
+						"job_id":       res.JobID,
+						"backgrounded": true,
+					}, nil
 				}
-				return content, map[string]interface{}{
-					"job_id":    res.JobID,
-					"exit_code": done.ExitCode,
-				}, nil
 			},
 		},
 		"sandbox-read": {
@@ -245,15 +296,15 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				}
 				// Deployments belong to the calling session (if one is given),
 				// so GET /sandboxes/{session} can list them.
-				session := ""
-				if sid := strArg(args, "_session"); sid != "" {
-					session = sid
-				} else if org := strArg(args, "org"); org != "" {
-					bm := strArg(args, "bookmark")
-					if bm == "" {
-						bm = "main"
+				session := sessionName
+				if session == "" {
+					if org := strArg(args, "org"); org != "" {
+						bm := strArg(args, "bookmark")
+						if bm == "" {
+							bm = "main"
+						}
+						session = org + ":" + strArg(args, "repo") + ":" + bm
 					}
-					session = org + ":" + strArg(args, "repo") + ":" + bm
 				}
 				rr := resourceRequestFromArgs(args)
 				reqs, err := rr.Requirements()

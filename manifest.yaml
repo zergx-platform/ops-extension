@@ -20,6 +20,7 @@ tools:
       properties:
         command: { type: string }
         workdir: { type: string }
+        timeout_ms: { type: integer, description: "Synchronous wait ceiling in milliseconds (default 10000). If the command does not finish within this window it is backgrounded and a completion notice is sent to the chat." }
       required: [command]
   - name: sandbox-read
     description: Read a file from the session sandbox filesystem (synced to repo first).
