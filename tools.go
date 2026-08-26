@@ -473,8 +473,8 @@ func (s *server) sandboxEdit(ctx context.Context, cid, path string, startLine, e
 		newLines = strings.Split(content, "\n")
 	}
 	if endLine < startLine {
-		// insert before startLine
-		insertAt := int(startLine)
+		// insert before startLine (1-based)
+		insertAt := int(startLine - 1)
 		if insertAt > len(lines) {
 			insertAt = len(lines)
 		}
@@ -483,8 +483,9 @@ func (s *server) sandboxEdit(ctx context.Context, cid, path string, startLine, e
 		v = append(v, lines[insertAt:]...)
 		lines = v
 	} else {
-		sIdx := int(startLine)
-		eIdx := int(endLine + 1)
+		// replace [startLine, endLine] (1-based, inclusive)
+		sIdx := int(startLine - 1)
+		eIdx := int(endLine)
 		if eIdx > len(lines) {
 			eIdx = len(lines)
 		}
