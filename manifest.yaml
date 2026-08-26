@@ -8,9 +8,6 @@ variables:
   - name: sandbox-id
     scope: session
     description: Container ID of the session sandbox.
-  - name: worker-url
-    scope: session
-    description: WebSocket URL of the session sandbox worker.
   - name: sandbox-status
     scope: session
     description: Status of the session sandbox.

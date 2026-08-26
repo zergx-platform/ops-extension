@@ -17,9 +17,6 @@ func (s *server) publishSandboxVars(ctx context.Context, sid string, info k8s.Co
 		return
 	}
 	_ = s.ext.SetSessionVariable(ctx, sid, "sandbox-id", info.ContainerID)
-	if info.WorkerURL != "" {
-		_ = s.ext.SetSessionVariable(ctx, sid, "worker-url", info.WorkerURL)
-	}
 	_ = s.ext.SetSessionVariable(ctx, sid, "sandbox-status", info.Status)
 }
 

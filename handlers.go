@@ -179,13 +179,13 @@ func (s *server) sandboxWrite(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Name      string                `json:"name"`
-		Image     string                `json:"image"`
-		Replicas  int32                 `json:"replicas"`
-		Port      int32                 `json:"port"`
-		Env       map[string]string     `json:"env"`
-		Session   string                `json:"session"`
-		Resources *k8s.ResourceRequest  `json:"resources"`
+		Name      string               `json:"name"`
+		Image     string               `json:"image"`
+		Replicas  int32                `json:"replicas"`
+		Port      int32                `json:"port"`
+		Env       map[string]string    `json:"env"`
+		Session   string               `json:"session"`
+		Resources *k8s.ResourceRequest `json:"resources"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
 	if b.Name == "" || b.Image == "" {
