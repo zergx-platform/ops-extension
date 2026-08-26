@@ -28,9 +28,18 @@
       group: 'Images',
       tools: [
         ['container-build', 'Build a Containerfile from the repo via buildkitd + push'],
-        ['container-deploy', 'Deploy an image as a k8s Deployment'],
+        ['container-deploy', 'Deploy an image as a k8s Deployment (nested resources)'],
         ['image-list', 'List OCI registry images'],
         ['list-containerfile-templates', 'Built-in Containerfile templates'],
+      ],
+    },
+    {
+      group: 'Helm',
+      tools: [
+        ['helm-install', 'Install/upgrade a Helm chart from the repo checkout (chart_path)'],
+        ['helm-list', 'List Helm releases in the namespace'],
+        ['helm-status', 'Show one release status'],
+        ['helm-uninstall', 'Uninstall a release'],
       ],
     },
     {
@@ -47,7 +56,7 @@
   ]
 </script>
 
-<Page title="Tools" desc="17 NATS tools exposed to the agent (discovered via the extension SDK)">
+<Page title="Tools" desc="21 NATS tools exposed to the agent (discovered via the extension SDK)">
   <div class="space-y-4">
     {#each groups as g (g.group)}
       <Card.Root>

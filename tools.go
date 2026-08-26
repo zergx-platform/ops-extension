@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 
 	abep "abep.dev/sdk"
@@ -268,6 +270,77 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				v, err := s.imageList(ctx)
 				return v, nil, err
+			},
+		},
+		"helm-install": {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				release := strArg(args, "release_name")
+				if release == "" {
+					return "", nil, fmt.Errorf("helm-install: missing 'release_name'")
+				}
+				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
+				if err != nil {
+					return "", nil, err
+				}
+				payload := map[string]interface{}{
+					"release_name": release,
+					"org":          ws.org,
+					"repo":         ws.repo,
+					"bookmark":     ws.bookmark,
+					"chart_path":   strArg(args, "chart_path"),
+				}
+				if v := args["values"]; v != nil {
+					payload["values"] = v
+				}
+				res, err := s.httpPostJSON(ctx, selfBase()+"/api/v1/helm/install", payload)
+				if err != nil {
+					return "", nil, fmt.Errorf("helm-install failed: %w", err)
+				}
+				var submit struct {
+					BuildID string `json:"build_id"`
+				}
+				if err := json.Unmarshal([]byte(res), &submit); err != nil || submit.BuildID == "" {
+					return "", nil, fmt.Errorf("helm-install failed: no build_id in %s", res)
+				}
+				return s.awaitBuild(ctx, submit.BuildID)
+			},
+		},
+		"helm-list": {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				v, err := s.httpGetJSON(ctx, selfBase()+"/api/v1/helm/releases")
+				return v, nil, err
+			},
+		},
+		"helm-status": {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				name := strArg(args, "release_name")
+				if name == "" {
+					return "", nil, fmt.Errorf("helm-status: missing 'release_name'")
+				}
+				v, err := s.httpGetJSON(ctx, selfBase()+"/api/v1/helm/releases/"+urlPathEscape(name)+"/status")
+				return v, nil, err
+			},
+		},
+		"helm-uninstall": {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				name := strArg(args, "release_name")
+				if name == "" {
+					return "", nil, fmt.Errorf("helm-uninstall: missing 'release_name'")
+				}
+				req, err := http.NewRequestWithContext(ctx, http.MethodDelete, selfBase()+"/api/v1/helm/releases/"+urlPathEscape(name), nil)
+				if err != nil {
+					return "", nil, err
+				}
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return "", nil, fmt.Errorf("helm-uninstall failed: %w", err)
+				}
+				defer resp.Body.Close()
+				body, _ := io.ReadAll(resp.Body)
+				if resp.StatusCode >= 300 {
+					return "", nil, fmt.Errorf("helm-uninstall failed: HTTP %d %s", resp.StatusCode, string(body))
+				}
+				return fmt.Sprintf("Uninstalled helm release %q", name), nil, nil
 			},
 		},
 		"package-publish": {

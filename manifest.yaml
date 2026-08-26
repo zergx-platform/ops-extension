@@ -129,6 +129,34 @@ tools:
     input_schema:
       type: object
       properties: {}
+  - name: helm-install
+    description: Install (or upgrade) a Helm chart from the session's repo checkout (chart_path relative to repo root) as a release in the cluster namespace. Values override chart defaults. Runs async; returns once installed or failed.
+    input_schema:
+      type: object
+      properties:
+        release_name: { type: string }
+        chart_path: { type: string }
+        values: { type: object }
+      required: [release_name]
+  - name: helm-list
+    description: List Helm releases in the cluster namespace.
+    input_schema:
+      type: object
+      properties: {}
+  - name: helm-status
+    description: Show the status of one Helm release.
+    input_schema:
+      type: object
+      properties:
+        release_name: { type: string }
+      required: [release_name]
+  - name: helm-uninstall
+    description: Uninstall a Helm release.
+    input_schema:
+      type: object
+      properties:
+        release_name: { type: string }
+      required: [release_name]
   - name: package-publish
     description: "Publish the repo checkout as a package. Runs the protocol's official CLI inside a containerfile build (buildkit, no image export). Protocols: npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift. Manifest-driven protocols (npm/pypi/cargo/...) read name+version from the package manifest; go/hex/composer/maven/swift/generic need explicit name+version (+file for generic)."
     input_schema:

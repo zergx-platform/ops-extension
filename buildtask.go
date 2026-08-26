@@ -349,9 +349,9 @@ func (s *server) awaitBuild(ctx context.Context, id string) (string, map[string]
 		t := v.(*buildTask)
 		if t.State != "running" {
 			if t.Error != "" {
-				return "", nil, fmt.Errorf("container-build failed: %s", t.Error)
+				return "", nil, fmt.Errorf("%s failed: %s", t.Kind, t.Error)
 			}
-			return fmt.Sprintf("Built image %s", t.Image), nil, nil
+			return fmt.Sprintf("Finished %s %q", t.Kind, t.Tag), nil, nil
 		}
 		select {
 		case <-ctx.Done():
