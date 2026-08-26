@@ -35,10 +35,11 @@ type wsCacheEntry struct {
 }
 
 // resolveWorkspace maps a tool call to its workspace. Priority: `_session`
-// ("org:repo:bookmark", verified against jj-server) → legacy `_org`/`_repo`/
-// `_branch` args (verified the same way). ops-extension talks to jj-server
-// only — no repo-extension, no mapping table.
-func (s *server) resolveWorkspace(ctx context.Context, args map[string]interface{}) (workspace, string, error) {
+// ("org:repo:bookmark", verified against jj-server) → the first-class
+// `session_name` envelope field (same verification) → legacy `_org`/`_repo`/
+// `_branch` args. ops-extension talks to jj-server only — no repo-extension,
+// no mapping table.
+func (s *server) resolveWorkspace(ctx context.Context, args map[string]interface{}, sessionName string) (workspace, string, error) {
 	if sid := strArg(args, "_session"); sid != "" {
 		org, repo, bm, ok := parseSessionName(sid)
 		if !ok {
@@ -47,6 +48,15 @@ func (s *server) resolveWorkspace(ctx context.Context, args map[string]interface
 		}
 		ws, err := s.lookupWorkspace(ctx, sid, org, repo, bm)
 		return ws, sid, err
+	}
+	if sessionName != "" {
+		org, repo, bm, ok := parseSessionName(sessionName)
+		if !ok {
+			return workspace{}, "", fmt.Errorf(
+				"session %q is not named org:repo:bookmark — cannot resolve its workspace (rename the session or pass _org/_repo/_branch explicitly)", sessionName)
+		}
+		ws, err := s.lookupWorkspace(ctx, sessionName, org, repo, bm)
+		return ws, sessionName, err
 	}
 	org, repo, bm := strArg(args, "_org"), strArg(args, "_repo"), strArg(args, "_branch")
 	if org == "" || repo == "" {
@@ -119,8 +129,8 @@ func (s *server) jjBookmarkHead(ctx context.Context, org, repo, bm string) (stri
 // ensureSandbox resolves the workspace, ensures the session's worker pod
 // exists (get-or-create), and — when needSync — that the pod's workspace
 // matches the bookmark head.
-func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{}, needSync bool) (sandboxCtx, error) {
-	ws, sid, err := s.resolveWorkspace(ctx, args)
+func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{}, sessionName string, needSync bool) (sandboxCtx, error) {
+	ws, sid, err := s.resolveWorkspace(ctx, args, sessionName)
 	if err != nil {
 		return sandboxCtx{}, err
 	}

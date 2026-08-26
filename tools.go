@@ -29,12 +29,12 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				"required": []string{"command"},
 			},
 			Streaming: true,
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, emit func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, emit func(string)) (string, map[string]interface{}, error) {
 				command := strArg(args, "command")
 				if command == "" {
 					return "", nil, fmt.Errorf("sandbox-run: missing 'command'")
 				}
-				sc, err := s.ensureSandbox(ctx, args, true)
+				sc, err := s.ensureSandbox(ctx, args, sessionName, true)
 				if err != nil {
 					return "", nil, err
 				}
@@ -96,9 +96,9 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"path"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				path := strArg(args, "path")
-				sc, err := s.ensureSandbox(ctx, args, true)
+				sc, err := s.ensureSandbox(ctx, args, sessionName, true)
 				if err != nil {
 					return "", nil, err
 				}
@@ -119,9 +119,9 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"path", "content"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				path := strArg(args, "path")
-				sc, err := s.ensureSandbox(ctx, args, false)
+				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
 				}
@@ -143,12 +143,12 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"path", "start_line", "end_line"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				path := strArg(args, "path")
 				startLine := intArg64(args, "start_line", 0)
 				endLine := intArg64(args, "end_line", 0)
 				content := strArg(args, "content")
-				sc, err := s.ensureSandbox(ctx, args, true)
+				sc, err := s.ensureSandbox(ctx, args, sessionName, true)
 				if err != nil {
 					return "", nil, err
 				}
@@ -162,8 +162,8 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				"type":       "object",
 				"properties": map[string]interface{}{},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
-				sc, err := s.ensureSandbox(ctx, args, false)
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
 				}
@@ -186,8 +186,8 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"job_id"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
-				sc, err := s.ensureSandbox(ctx, args, false)
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
 				}
@@ -208,8 +208,8 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"job_id"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
-				sc, err := s.ensureSandbox(ctx, args, false)
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
 				}
@@ -230,8 +230,8 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"job_id", "data"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
-				sc, err := s.ensureSandbox(ctx, args, false)
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
 				}
@@ -254,8 +254,8 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"job_id"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
-				sc, err := s.ensureSandbox(ctx, args, false)
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
 				}
@@ -279,8 +279,8 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"sandbox_path", "repo_path"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
-				sc, err := s.ensureSandbox(ctx, args, false)
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
 					return "", nil, err
 				}
@@ -305,8 +305,8 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"dockerfile_path", "tag"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
-				ws, _, err := s.resolveWorkspace(ctx, args)
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
+				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
 				if err != nil {
 					return "", nil, err
 				}
@@ -343,7 +343,7 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"image"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				image := strArg(args, "image")
 				name := strArg(args, "name")
 				if name == "" {
@@ -373,7 +373,7 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				"type":       "object",
 				"properties": map[string]interface{}{},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				v, err := s.imageList(ctx)
 				return v, nil, err
 			},
@@ -394,12 +394,12 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"protocol"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				protocol := strArg(args, "protocol")
 				// Explicit org/repo win; else resolve the session workspace.
 				org, repo, bookmark := strArg(args, "org"), strArg(args, "repo"), strArg(args, "bookmark")
 				if org == "" || repo == "" {
-					ws, _, err := s.resolveWorkspace(ctx, args)
+					ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
 					if err != nil {
 						return "", nil, err
 					}
@@ -425,14 +425,14 @@ func (s *server) tools() map[string]abep.ToolSpec {
 					"name":     map[string]interface{}{"type": "string"},
 				},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				v, err := s.httpGetJSON(ctx, s.artifact+"/pkgs/system/packages")
 				return v, nil, err
 			},
 		},
 		"list-containerfile-templates": {
 			Description: "List built-in Containerfile/build templates.",
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				return toJSON(builtinTemplates()), nil, nil
 			},
 		},
@@ -446,7 +446,7 @@ func (s *server) tools() map[string]abep.ToolSpec {
 				},
 				"required": []string{"git_url"},
 			},
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, _ string, _ func(string)) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				gitURL := strArg(args, "git_url")
 				if gitURL == "" {
 					return "", nil, fmt.Errorf("pull-git-repo: missing 'git_url'")
