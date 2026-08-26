@@ -17,7 +17,7 @@ require gopkg.in/yaml.v3 v3.0.1 // indirect
 
 require (
 	abep.dev/sdk v0.2.4
-	abep.dev/sdk/nats v0.1.3
+	abep.dev/sdk/nats v0.2.0
 	github.com/Microsoft/go-winio v0.6.3-0.20251027160822-ad3df93bed29 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/containerd/api v1.11.1 // indirect
