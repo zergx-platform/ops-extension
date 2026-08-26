@@ -99,23 +99,23 @@ func main() {
 			slog.Error("nats connect failed", "svc", "ops-extension", "err", err)
 			os.Exit(1)
 		}
-		ext := abep.NewExtension(nbus, abep.Config{
-			ID:      "ops",
-			Version: "0.1.0",
-			Tools:   s.tools(),
-			Variables: map[string]abep.VariableSpec{
-				"sandbox-id":     {Scope: "session"},
-				"worker-url":     {Scope: "session"},
-				"sandbox-status": {Scope: "session", Resolve: s.resolveSandboxStatus},
+		manifest, err := abep.LoadManifest("manifest.yaml")
+		if err != nil {
+			slog.Error("load manifest failed", "svc", "ops-extension", "err", err)
+			os.Exit(1)
+		}
+		ext := abep.NewExtension(nbus, manifest.Config(
+			s.handlers(),
+			map[string]abep.VariableSpec{
+				"sandbox-status": {Resolve: s.resolveSandboxStatus},
 			},
-			Lifecycle: []string{"deleted"},
-			OnLifecycle: func(ctx context.Context, ev abep.LifecycleEvent) error {
+			func(ctx context.Context, ev abep.LifecycleEvent) error {
 				if ev.Kind == "deleted" {
 					s.clearSandboxVars(ctx, ev.SessionName)
 				}
 				return nil
 			},
-		})
+		))
 		s.ext = ext
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -182,7 +182,7 @@ func main() {
 // (RUCODER_DISABLE_NATS=1). Body: JSON object of tool args.
 func (s *server) callTool(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	spec, ok := s.tools()[name]
+	spec, ok := s.handlers()[name]
 	if !ok {
 		writeErr(w, http.StatusNotFound, "no such tool: "+name)
 		return

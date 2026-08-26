@@ -11,24 +11,15 @@ import (
 	"rucoder-agent/ops-extension/internal/worker"
 )
 
-// tools returns the NATS tool set. Sandbox tools are session-scoped: the
-// agent injects `_session` ("org:repo:bookmark"); ops-extension resolves the
-// workspace via jj-server, lazily creates/reuses the session's worker pod,
-// and syncs the repo tree into it (overlay-only, sandbox-only files are
-// never deleted) before running.
-func (s *server) tools() map[string]abep.ToolSpec {
+// handlers returns the NATS tool handlers. Descriptions/schemas live in
+// manifest.yaml (the single declarative protocol source); each handler is
+// bound by tool name. Sandbox tools are session-scoped: ops-extension
+// resolves the workspace via jj-server, lazily creates/reuses the session's
+// worker pod, and syncs the repo tree into it (overlay-only, sandbox-only
+// files are never deleted) before running.
+func (s *server) handlers() map[string]abep.ToolSpec {
 	return map[string]abep.ToolSpec{
 		"sandbox-run": {
-			Description: "Run a shell command in the session sandbox. The workspace is synced to the repo bookmark head first (repo files refreshed; sandbox-only files kept).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"command": map[string]interface{}{"type": "string"},
-					"workdir": map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"command"},
-			},
-			Streaming: true,
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, emit func(string)) (string, map[string]interface{}, error) {
 				command := strArg(args, "command")
 				if command == "" {
@@ -88,14 +79,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-read": {
-			Description: "Read a file from the session sandbox filesystem (synced to repo first).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path": map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"path"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				path := strArg(args, "path")
 				sc, err := s.ensureSandbox(ctx, args, sessionName, true)
@@ -110,15 +93,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-write": {
-			Description: "Write a file into the session sandbox filesystem (no sync first — never clobbers in-progress edits).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path":    map[string]interface{}{"type": "string"},
-					"content": map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"path", "content"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				path := strArg(args, "path")
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
@@ -132,17 +106,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-edit": {
-			Description: "Replace or insert lines in a sandbox file by line numbers (synced to repo first).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"start_line": map[string]interface{}{"type": "integer"},
-					"end_line":   map[string]interface{}{"type": "integer"},
-					"path":       map[string]interface{}{"type": "string"},
-					"content":    map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"path", "start_line", "end_line"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				path := strArg(args, "path")
 				startLine := intArg64(args, "start_line", 0)
@@ -157,11 +120,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-job-list": {
-			Description: "List jobs (commands) in the session sandbox.",
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
@@ -175,17 +133,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-job-output": {
-			Description: "Read output of a sandbox job (supports offset/limit/grep).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"job_id": map[string]interface{}{"type": "string"},
-					"start":  map[string]interface{}{"type": "integer"},
-					"end":    map[string]interface{}{"type": "integer"},
-					"grep":   map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"job_id"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
@@ -199,15 +146,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-job-wait": {
-			Description: "Wait for a sandbox job to finish.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"job_id":     map[string]interface{}{"type": "string"},
-					"timeout_ms": map[string]interface{}{"type": "integer"},
-				},
-				"required": []string{"job_id"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
@@ -221,15 +159,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-job-stdin": {
-			Description: "Send stdin data to a running sandbox job.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"job_id": map[string]interface{}{"type": "string"},
-					"data":   map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"job_id", "data"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
@@ -246,14 +175,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-job-kill": {
-			Description: "Kill a sandbox job.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"job_id": map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"job_id"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
@@ -269,16 +190,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"sandbox-port": {
-			Description: "Copy a file from the sandbox into the session's repo (bookmark moves; the change syncs back on the next sandbox tool call).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"sandbox_path": map[string]interface{}{"type": "string"},
-					"repo_path":    map[string]interface{}{"type": "string"},
-					"message":      map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"sandbox_path", "repo_path"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
@@ -294,17 +205,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"container-build": {
-			Description: "Build a container image from a Containerfile in the repo using the remote buildkit builder.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"dockerfile_path": map[string]interface{}{"type": "string"},
-					"tag":             map[string]interface{}{"type": "string"},
-					"context":         map[string]interface{}{"type": "string"},
-					"no_cache":        map[string]interface{}{"type": "boolean"},
-				},
-				"required": []string{"dockerfile_path", "tag"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
 				if err != nil {
@@ -334,15 +234,6 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"container-deploy": {
-			Description: "Deploy a container image as a Kubernetes deployment.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"image": map[string]interface{}{"type": "string"},
-					"name":  map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"image"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				image := strArg(args, "image")
 				name := strArg(args, "name")
@@ -368,32 +259,12 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"image-list": {
-			Description: "List container images in the OCI registry.",
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				v, err := s.imageList(ctx)
 				return v, nil, err
 			},
 		},
 		"package-publish": {
-			Description: "Publish the repo checkout as a package. Runs the protocol's official CLI inside a containerfile build (buildkit, no image export). Protocols: npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift. Manifest-driven protocols (npm/pypi/cargo/...) read name+version from the package manifest; go/hex/composer/maven/swift/generic need explicit name+version (+file for generic).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"protocol":        map[string]interface{}{"type": "string"},
-					"org":             map[string]interface{}{"type": "string"},
-					"repo":            map[string]interface{}{"type": "string"},
-					"bookmark":        map[string]interface{}{"type": "string"},
-					"name":            map[string]interface{}{"type": "string"},
-					"version":         map[string]interface{}{"type": "string"},
-					"file":            map[string]interface{}{"type": "string"},
-					"dockerfile_path": map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"protocol"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				protocol := strArg(args, "protocol")
 				// Explicit org/repo win; else resolve the session workspace.
@@ -417,35 +288,17 @@ func (s *server) tools() map[string]abep.ToolSpec {
 			},
 		},
 		"list-registry-packages": {
-			Description: "List packages and versions stored in the artifact registry (all protocols).",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"protocol": map[string]interface{}{"type": "string"},
-					"name":     map[string]interface{}{"type": "string"},
-				},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				v, err := s.httpGetJSON(ctx, s.artifact+"/pkgs/system/packages")
 				return v, nil, err
 			},
 		},
 		"list-containerfile-templates": {
-			Description: "List built-in Containerfile/build templates.",
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				return toJSON(builtinTemplates()), nil, nil
 			},
 		},
 		"pull-git-repo": {
-			Description: "Clone a remote git repository into jj-server local storage (org 'external').",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"git_url": map[string]interface{}{"type": "string"},
-					"org":     map[string]interface{}{"type": "string"},
-				},
-				"required": []string{"git_url"},
-			},
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string, _ func(string)) (string, map[string]interface{}, error) {
 				gitURL := strArg(args, "git_url")
 				if gitURL == "" {

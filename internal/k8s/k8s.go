@@ -61,6 +61,61 @@ func (m *Manager) resourcesFor() corev1.ResourceRequirements {
 	}
 }
 
+// ResourcePair is one side of a nested resource declaration.
+type ResourcePair struct {
+	CPU    string `json:"cpu,omitempty"`
+	Memory string `json:"memory,omitempty"`
+}
+
+// ResourceRequest is the nested `resources:{requests:{...},limits:{...}}`
+// shape accepted by the deploy API and the container-deploy tool. Empty means
+// "fall back to the manager's global defaults".
+type ResourceRequest struct {
+	Requests *ResourcePair `json:"requests,omitempty"`
+	Limits   *ResourcePair `json:"limits,omitempty"`
+}
+
+// Requirements converts a nested resource request into a
+// *corev1.ResourceRequirements, or nil when nothing was specified. Quantities
+// are parsed (never MustParse) so a malformed value is a caller error, not a
+// panic.
+func (r *ResourceRequest) Requirements() (*corev1.ResourceRequirements, error) {
+	if r == nil || (r.Requests == nil && r.Limits == nil) {
+		return nil, nil
+	}
+	out := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{},
+		Limits:   corev1.ResourceList{},
+	}
+	fill := func(list corev1.ResourceList, pair *ResourcePair, side string) error {
+		if pair == nil {
+			return nil
+		}
+		if pair.CPU != "" {
+			q, err := resource.ParseQuantity(pair.CPU)
+			if err != nil {
+				return fmt.Errorf("resources.%s.cpu: %w", side, err)
+			}
+			list[corev1.ResourceCPU] = q
+		}
+		if pair.Memory != "" {
+			q, err := resource.ParseQuantity(pair.Memory)
+			if err != nil {
+				return fmt.Errorf("resources.%s.memory: %w", side, err)
+			}
+			list[corev1.ResourceMemory] = q
+		}
+		return nil
+	}
+	if err := fill(out.Requests, r.Requests, "requests"); err != nil {
+		return nil, err
+	}
+	if err := fill(out.Limits, r.Limits, "limits"); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ContainerInfo is a running worker pod.
 type ContainerInfo struct {
 	ContainerID string
@@ -370,14 +425,21 @@ func (m *Manager) DestroyContainer(ctx context.Context, id string) error {
 // EnsureDeployment creates (or updates) a Deployment + Service for a registry
 // image. `session` (raw "org:repo:bookmark") ties the deployment to a session;
 // empty means an unowned deployment. Existing deployments are updated in place
-// (image/replicas/env/port) so a same-name redeploy triggers a normal rolling
-// update; the Service keeps its immutable clusterIP.
-func (m *Manager) EnsureDeployment(ctx context.Context, name, image string, replicas, port int32, env map[string]string, session string) error {
+// (image/replicas/env/port/resources) so a same-name redeploy triggers a
+// normal rolling update; the Service keeps its immutable clusterIP.
+// `resources`, when non-nil, overrides the manager's global defaults for this
+// deployment only.
+func (m *Manager) EnsureDeployment(ctx context.Context, name, image string, replicas, port int32, env map[string]string, session string, resources *corev1.ResourceRequirements) error {
 	replicas = max(replicas, 1)
 
 	envVars := make([]corev1.EnvVar, 0, len(env))
 	for k, v := range env {
 		envVars = append(envVars, corev1.EnvVar{Name: k, Value: v})
+	}
+
+	reqs := m.resourcesFor()
+	if resources != nil {
+		reqs = *resources
 	}
 
 	labels := map[string]string{
@@ -391,7 +453,7 @@ func (m *Manager) EnsureDeployment(ctx context.Context, name, image string, repl
 		Image:           image,
 		ImagePullPolicy: corev1.PullAlways,
 		Env:             envVars,
-		Resources:       m.resourcesFor(),
+		Resources:       reqs,
 		Ports:           []corev1.ContainerPort{{ContainerPort: port}},
 	}
 
@@ -426,8 +488,9 @@ func (m *Manager) EnsureDeployment(ctx context.Context, name, image string, repl
 		deploy := &appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: m.config.Namespace, Labels: labels},
 			Spec: appsv1.DeploymentSpec{
-				Replicas: &replicas,
-				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+				Replicas:             &replicas,
+				RevisionHistoryLimit: ptrInt32(10),
+				Selector:             &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels:      labels,
@@ -490,6 +553,7 @@ type DeploymentInfo struct {
 	Age       string
 	Ports     []int32
 	Session   string // raw session name (annotation), empty when unowned
+	Resources ResourceRequest
 }
 
 // DeploymentStatus reports the rollout state of a deployment.
@@ -551,9 +615,45 @@ func (m *Manager) listDeployments(ctx context.Context, sessionKey string) ([]Dep
 			Age:       formatAge(d.CreationTimestamp.Time),
 			Ports:     ports,
 			Session:   session,
+			Resources: resourcesFromContainer(spec),
 		})
 	}
 	return out, nil
+}
+
+// resourcesFromContainer extracts the first container's resource requirements
+// into the nested ResourceRequest shape (empty when unset).
+func resourcesFromContainer(spec corev1.PodSpec) ResourceRequest {
+	if len(spec.Containers) == 0 {
+		return ResourceRequest{}
+	}
+	res := spec.Containers[0].Resources
+	out := ResourceRequest{}
+	if cpu, ok := res.Requests[corev1.ResourceCPU]; ok {
+		if out.Requests == nil {
+			out.Requests = &ResourcePair{}
+		}
+		out.Requests.CPU = cpu.String()
+	}
+	if mem, ok := res.Requests[corev1.ResourceMemory]; ok {
+		if out.Requests == nil {
+			out.Requests = &ResourcePair{}
+		}
+		out.Requests.Memory = mem.String()
+	}
+	if cpu, ok := res.Limits[corev1.ResourceCPU]; ok {
+		if out.Limits == nil {
+			out.Limits = &ResourcePair{}
+		}
+		out.Limits.CPU = cpu.String()
+	}
+	if mem, ok := res.Limits[corev1.ResourceMemory]; ok {
+		if out.Limits == nil {
+			out.Limits = &ResourcePair{}
+		}
+		out.Limits.Memory = mem.String()
+	}
+	return out
 }
 
 // DeploymentPods returns the pods of a deployment.

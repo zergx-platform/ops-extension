@@ -1,0 +1,155 @@
+# ops-extension protocol manifest — single declarative source for the
+# extension's wire protocol (tools + session variables + lifecycle). Handler
+# and resolver bindings stay in code (tools.go / variables.go).
+id: ops
+version: 0.1.0
+lifecycle: [deleted]
+variables:
+  - name: sandbox-id
+    scope: session
+    description: 会话沙箱容器 ID
+  - name: worker-url
+    scope: session
+    description: 会话沙箱 worker 的 WebSocket 地址
+  - name: sandbox-status
+    scope: session
+    description: 会话沙箱状态
+tools:
+  - name: sandbox-run
+    description: Run a shell command in the session sandbox. The workspace is synced to the repo bookmark head first (repo files refreshed; sandbox-only files kept).
+    streaming: true
+    input_schema:
+      type: object
+      properties:
+        command: { type: string }
+        workdir: { type: string }
+      required: [command]
+  - name: sandbox-read
+    description: Read a file from the session sandbox filesystem (synced to repo first).
+    input_schema:
+      type: object
+      properties:
+        path: { type: string }
+      required: [path]
+  - name: sandbox-write
+    description: Write a file into the session sandbox filesystem (no sync first — never clobbers in-progress edits).
+    input_schema:
+      type: object
+      properties:
+        path: { type: string }
+        content: { type: string }
+      required: [path, content]
+  - name: sandbox-edit
+    description: Replace or insert lines in a sandbox file by line numbers (synced to repo first).
+    input_schema:
+      type: object
+      properties:
+        start_line: { type: integer }
+        end_line: { type: integer }
+        path: { type: string }
+        content: { type: string }
+      required: [path, start_line, end_line]
+  - name: sandbox-job-list
+    description: List jobs (commands) in the session sandbox.
+    input_schema:
+      type: object
+      properties: {}
+  - name: sandbox-job-output
+    description: Read output of a sandbox job (supports offset/limit/grep).
+    input_schema:
+      type: object
+      properties:
+        job_id: { type: string }
+        start: { type: integer }
+        end: { type: integer }
+        grep: { type: string }
+      required: [job_id]
+  - name: sandbox-job-wait
+    description: Wait for a sandbox job to finish.
+    input_schema:
+      type: object
+      properties:
+        job_id: { type: string }
+        timeout_ms: { type: integer }
+      required: [job_id]
+  - name: sandbox-job-stdin
+    description: Send stdin data to a running sandbox job.
+    input_schema:
+      type: object
+      properties:
+        job_id: { type: string }
+        data: { type: string }
+      required: [job_id, data]
+  - name: sandbox-job-kill
+    description: Kill a sandbox job.
+    input_schema:
+      type: object
+      properties:
+        job_id: { type: string }
+      required: [job_id]
+  - name: sandbox-port
+    description: Copy a file from the sandbox into the session's repo (bookmark moves; the change syncs back on the next sandbox tool call).
+    input_schema:
+      type: object
+      properties:
+        sandbox_path: { type: string }
+        repo_path: { type: string }
+        message: { type: string }
+      required: [sandbox_path, repo_path]
+  - name: container-build
+    description: Build a container image from a Containerfile in the repo using the remote buildkit builder.
+    input_schema:
+      type: object
+      properties:
+        dockerfile_path: { type: string }
+        tag: { type: string }
+        context: { type: string }
+        no_cache: { type: boolean }
+      required: [dockerfile_path, tag]
+  - name: container-deploy
+    description: Deploy a container image as a Kubernetes deployment.
+    input_schema:
+      type: object
+      properties:
+        image: { type: string }
+        name: { type: string }
+      required: [image]
+  - name: image-list
+    description: List container images in the OCI registry.
+    input_schema:
+      type: object
+      properties: {}
+  - name: package-publish
+    description: Publish the repo checkout as a package. Runs the protocol's official CLI inside a containerfile build (buildkit, no image export). Protocols: npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift. Manifest-driven protocols (npm/pypi/cargo/...) read name+version from the package manifest; go/hex/composer/maven/swift/generic need explicit name+version (+file for generic).
+    input_schema:
+      type: object
+      properties:
+        protocol: { type: string }
+        org: { type: string }
+        repo: { type: string }
+        bookmark: { type: string }
+        name: { type: string }
+        version: { type: string }
+        file: { type: string }
+        dockerfile_path: { type: string }
+      required: [protocol]
+  - name: list-registry-packages
+    description: List packages and versions stored in the artifact registry (all protocols).
+    input_schema:
+      type: object
+      properties:
+        protocol: { type: string }
+        name: { type: string }
+  - name: list-containerfile-templates
+    description: List built-in Containerfile/build templates.
+    input_schema:
+      type: object
+      properties: {}
+  - name: pull-git-repo
+    description: Clone a remote git repository into jj-server local storage (org 'external').
+    input_schema:
+      type: object
+      properties:
+        git_url: { type: string }
+        org: { type: string }
+      required: [git_url]
