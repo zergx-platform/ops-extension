@@ -324,8 +324,16 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				// Resolve a bare image name/tag into a fully-qualified reference
 				// against the in-cluster artifact registry. Otherwise kubelet
 				// interprets "example-server" as docker.io/library/example-server
-				// and fails the pull (ImagePullBackOff).
-				image = s.qualifyImage(image)
+				// and fails the pull (ImagePullBackOff). A bare name defaults to
+				// the session's bookmark tag (matching container-build's default
+				// {tag}:{bookmark}), not "latest".
+				defaultTag := ""
+				if sessionName != "" {
+					if _, _, bm, ok := parseSessionName(sessionName); ok {
+						defaultTag = bm
+					}
+				}
+				image = s.qualifyImage(image, defaultTag)
 				rr := resourceRequestFromArgs(args)
 				reqs, err := rr.Requirements()
 				if err != nil {
@@ -536,11 +544,14 @@ func strArg(args map[string]interface{}, k string) string {
 // qualifyImage converts a possibly-bare image reference into a
 // fully-qualified in-cluster reference, mirroring how container-build tags
 // images (artifactImageHost/{tag}:{bookmark}). It accepts:
-//   - "example-server"          -> "artifact.zergx.svc.cluster.local/example-server:latest"
+//   - "example-server"          -> "artifact.zergx.svc.cluster.local/example-server:<defaultTag>"
 //   - "example-server:main"     -> "artifact.zergx.svc.cluster.local/example-server:main"
 //   - "repo/name:tag"           -> "artifact.zergx.svc.cluster.local/repo/name:tag"
 //   - "host/repo/name:tag"      -> left unchanged (already qualified)
-func (s *server) qualifyImage(ref string) string {
+//
+// defaultTag is the tag appended when the reference is bare; it should match
+// container-build's default (the session bookmark) so build+deploy agree.
+func (s *server) qualifyImage(ref, defaultTag string) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return ref
@@ -560,7 +571,10 @@ func (s *server) qualifyImage(ref string) string {
 	}
 	// Bare name, name:tag, or repo/name[:tag] — qualify with the artifact host.
 	if !strings.Contains(ref, ":") {
-		ref += ":latest"
+		if defaultTag == "" {
+			defaultTag = "latest"
+		}
+		ref += ":" + defaultTag
 	}
 	return host + "/" + ref
 }
