@@ -111,7 +111,7 @@ the agent sees the CLI error.
 | Env | Default |
 | --- | ------- |
 | `RUCODER_K8S_NAMESPACE` | `temp` |
-| `RUCODER_WORKER_IMAGE`  | `recoder-dev002.../rucoder-worker:dev` |
+| `RUCODER_WORKER_IMAGE`  | `rucoder-artifact.temp.10.199.64.20.nip.io/rucoder-worker:v0.0.1` |
 | `RUCODER_BUILDKIT_ADDR` | `tcp://rucoder-buildkitd.temp.svc.cluster.local:1234` |
 | `RUCODER_ARTIFACT_URL`  | `http://rucoder-artifact.temp.svc.cluster.local:80` (packages + OCI + metadata) |
 | `RUCODER_ARTIFACT_TOKEN`| *(empty — anonymous)* token for artifact write auth (Bearer / X-NuGet-ApiKey / npm _authToken per protocol) |
