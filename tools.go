@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -320,6 +321,11 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 						session = org + ":" + strArg(args, "repo") + ":" + bm
 					}
 				}
+				// Resolve a bare image name/tag into a fully-qualified reference
+				// against the in-cluster artifact registry. Otherwise kubelet
+				// interprets "example-server" as docker.io/library/example-server
+				// and fails the pull (ImagePullBackOff).
+				image = s.qualifyImage(image)
 				rr := resourceRequestFromArgs(args)
 				reqs, err := rr.Requirements()
 				if err != nil {
@@ -493,6 +499,58 @@ func strArg(args map[string]interface{}, k string) string {
 		return v
 	}
 	return ""
+}
+
+// qualifyImage converts a possibly-bare image reference into a
+// fully-qualified in-cluster reference, mirroring how container-build tags
+// images (artifactImageHost/{tag}:{bookmark}). It accepts:
+//   - "example-server"          -> "artifact.zergx.svc.cluster.local/example-server:latest"
+//   - "example-server:main"     -> "artifact.zergx.svc.cluster.local/example-server:main"
+//   - "repo/name:tag"           -> "artifact.zergx.svc.cluster.local/repo/name:tag"
+//   - "host/repo/name:tag"      -> left unchanged (already qualified)
+func (s *server) qualifyImage(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ref
+	}
+	host := s.artifactImageHost
+	// A registry host is present only when the first path segment (before the
+	// first '/') looks like a host: contains '.' or a colon followed by a
+	// numeric port, or equals "localhost". A bare "name:tag" (e.g. "example-
+	// server:main") has no '.' and its colon is followed by a non-numeric tag,
+	// so it is NOT a host and must be qualified.
+	first := ref
+	if i := strings.IndexByte(ref, '/'); i >= 0 {
+		first = ref[:i]
+	}
+	if isRegistryHost(first) {
+		return ref
+	}
+	// Bare name, name:tag, or repo/name[:tag] — qualify with the artifact host.
+	if !strings.Contains(ref, ":") {
+		ref += ":latest"
+	}
+	return host + "/" + ref
+}
+
+// isRegistryHost reports whether a first path segment is a registry host:
+// contains a '.', is "localhost", or is "host:port" with a numeric port.
+func isRegistryHost(seg string) bool {
+	if seg == "localhost" {
+		return true
+	}
+	if strings.Contains(seg, ".") {
+		return true
+	}
+	if i := strings.IndexByte(seg, ':'); i >= 0 {
+		port := seg[i+1:]
+		if port != "" {
+			if _, err := strconv.Atoi(port); err == nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func intArg64(args map[string]interface{}, k string, def int64) int64 {
