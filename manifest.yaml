@@ -130,6 +130,12 @@ tools:
     input_schema:
       type: object
       properties: {}
+  - name: deployment-list
+    description: List Kubernetes deployments created via container-deploy. When called with a session context, only that session's deployments are listed; pass all=true for every deployment in the runtime namespace.
+    input_schema:
+      type: object
+      properties:
+        all: { type: boolean }
   - name: helm-install
     description: Install (or upgrade) a Helm chart from the session's repo checkout (chart_path relative to repo root) as a release in the cluster namespace. Values override chart defaults. Runs async; returns once installed or failed.
     input_schema:

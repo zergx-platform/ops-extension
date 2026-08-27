@@ -343,6 +343,38 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				return v, nil, err
 			},
 		},
+		"deployment-list": {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+				all := boolArg(args, "all")
+				var list []k8s.DeploymentInfo
+				var err error
+				if all || sessionName == "" {
+					list, err = s.k8s.ListDeployments(ctx)
+				} else {
+					list, err = s.k8s.FindDeploymentsBySession(ctx, sessionName)
+				}
+				if err != nil {
+					return "", nil, fmt.Errorf("deployment-list failed: %w", err)
+				}
+				out := make([]map[string]interface{}, 0, len(list))
+				for _, d := range list {
+					out = append(out, map[string]interface{}{
+						"name":      d.Name,
+						"image":     d.Image,
+						"replicas":  d.Replicas,
+						"ready":     d.Ready,
+						"namespace": d.Namespace,
+						"ports":     d.Ports,
+						"session":   d.Session,
+					})
+				}
+				if len(out) == 0 {
+					return "No deployments found.", map[string]interface{}{"deployments": out}, nil
+				}
+				b, _ := json.MarshalIndent(out, "", "  ")
+				return string(b), map[string]interface{}{"deployments": out}, nil
+			},
+		},
 		"helm-install": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
 				release := strArg(args, "release_name")
