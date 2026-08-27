@@ -50,7 +50,7 @@ type server struct {
 
 func main() {
 	ns := env.Or("ZERGX_K8S_NAMESPACE", "temp")
-	img := env.Or("ZERGX_WORKER_IMAGE", "rucoder-artifact.temp.10.199.64.20.nip.io/zergx-worker:v0.0.1")
+	img := env.Or("ZERGX_WORKER_IMAGE", "artifact.zergx.svc.cluster.local/zergx-worker:v0.0.1")
 	natsURL := env.Or("NATS_URL", "nats://nats.develop.svc.cluster.local:4222")
 	port := env.Or("ZERGX_PORT", "8080")
 	buildkitAddr := env.Or("ZERGX_BUILDKIT_ADDR", "tcp://buildkitd.zergx.svc.cluster.local:1234")
@@ -61,11 +61,11 @@ func main() {
 	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
 	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
 	// used for API calls and in-container CLI uploads.
-	artifact := trimTrailingSlash(env.Or("ZERGX_ARTIFACT_URL", "http://rucoder-artifact.temp.10.199.64.20.nip.io:80"))
+	artifact := trimTrailingSlash(env.Or("ZERGX_ARTIFACT_URL", "http://artifact.zergx.svc.cluster.local:80"))
 	// Image references (buildkit FROM/push) must go through the TLS ingress
 	// host configured as insecure in buildkitd's registry config — the svc
 	// host is plain HTTP which buildkit cannot pull/push to.
-	artifactImageHost := env.Or("ZERGX_ARTIFACT_IMAGE_HOST", "rucoder-artifact.temp.10.199.64.20.nip.io")
+	artifactImageHost := env.Or("ZERGX_ARTIFACT_IMAGE_HOST", "artifact.zergx.svc.cluster.local")
 	artifactToken := env.Or("ZERGX_ARTIFACT_TOKEN", "")
 
 	km, err := k8s.NewManager(k8s.Config{
