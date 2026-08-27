@@ -513,13 +513,16 @@ func (m *Manager) EnsureDeployment(ctx context.Context, name, image string, repl
 	}
 
 	// Service: preserve clusterIP (immutable) on update.
+	// An app container listens on its `port` (8080); the Service exposes it
+	// on a uniform external port 80 so consumers always reach user deployments
+	// at the well-known HTTP port regardless of the container port.
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: m.config.Namespace, Labels: labels},
 		Spec: corev1.ServiceSpec{
 			Selector: map[string]string{"app": name},
 			Ports: []corev1.ServicePort{{
 				Name:       "http",
-				Port:       port,
+				Port:       80,
 				TargetPort: intstr.FromInt32(port),
 				Protocol:   corev1.ProtocolTCP,
 			}},
