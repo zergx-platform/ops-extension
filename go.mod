@@ -3,6 +3,7 @@ module forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension
 go 1.26.3
 
 require (
+	forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared v0.1.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
@@ -16,7 +17,6 @@ require (
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
-	forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared v0.1.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/MakeNowJust/heredoc v1.0.0 // indirect
@@ -76,8 +76,8 @@ require (
 )
 
 require (
-	abep.dev/sdk v0.2.8
-	abep.dev/sdk/nats v0.2.2
+	abep.dev/sdk v0.2.9
+	abep.dev/sdk/nats v0.2.3
 	github.com/Microsoft/go-winio v0.6.3-0.20251027160822-ad3df93bed29 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/containerd/api v1.11.1 // indirect
