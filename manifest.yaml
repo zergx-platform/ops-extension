@@ -100,6 +100,7 @@ tools:
       properties:
         dockerfile_path: { type: string }
         tag: { type: string }
+        image_tag: { type: string, description: "Optional semantic version for the pushed image reference (e.g. v0.0.1). When omitted the tag defaults to the source bookmark (a floating tag)." }
         context: { type: string }
         no_cache: { type: boolean }
       required: [dockerfile_path, tag]

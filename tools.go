@@ -283,6 +283,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					"bookmark":   ws.bookmark,
 					"dockerfile": strArg(args, "dockerfile_path"),
 					"tag":        strArg(args, "tag"),
+					"image_tag":  strArg(args, "image_tag"),
 					"context":    strArg(args, "context"),
 					"push":       true,
 					"no_cache":   boolArg(args, "no_cache"),
