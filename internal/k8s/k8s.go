@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	workerPort = 8080
+	workerPort = 48080
 
 	// labelOwned marks objects created by this service (vs. Helm/system
 	// deployments), so ListDeployments only returns what ops-extension owns.
