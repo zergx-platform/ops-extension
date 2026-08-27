@@ -74,11 +74,11 @@ var publishSpecs = map[string]publishSpec{
 	},
 	"cargo": {
 		// Cargo matches CARGO_REGISTRIES_<NAME>_* env vars by uppercasing the
-		// --registry name, so the env key must be uppercase (RUCODER).
+		// --registry name, so the env key must be uppercase (ZERGX).
 		image: "rust:1-alpine",
-		steps: `RUN export CARGO_REGISTRIES_RUCODER_INDEX="sparse+$ARTIFACT_URL/pkgs/cargo/index/" \
- && export CARGO_REGISTRIES_RUCODER_TOKEN="${ARTIFACT_TOKEN:-dummy}" \
- && cargo publish --registry rucoder --allow-dirty \
+		steps: `RUN export CARGO_REGISTRIES_ZERGX_INDEX="sparse+$ARTIFACT_URL/pkgs/cargo/index/" \
+ && export CARGO_REGISTRIES_ZERGX_TOKEN="${ARTIFACT_TOKEN:-dummy}" \
+ && cargo publish --registry zergx --allow-dirty \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"rubygems": {
@@ -219,10 +219,10 @@ EOF`,
  && pip config set global.trusted-host "$(echo "$ARTIFACT_URL" | sed 's|.*://||; s|[:/].*||')" \
  && pip install --no-cache-dir 'conan>=2' \
  && conan profile detect --force \
- && conan remote add rucoder "$ARTIFACT_URL/pkgs/conan" --force \
- && { [ -z "$ARTIFACT_TOKEN" ] || conan remote login rucoder agent -p "$ARTIFACT_TOKEN"; } \
+ && conan remote add zergx "$ARTIFACT_URL/pkgs/conan" --force \
+ && { [ -z "$ARTIFACT_TOKEN" ] || conan remote login zergx agent -p "$ARTIFACT_TOKEN"; } \
  && conan create . \
- && conan upload '*' -r rucoder -c \
+ && conan upload '*' -r zergx -c \
  && echo "$PUBLISH_TS" > /dev/null`,
 	},
 	"pub": {

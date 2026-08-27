@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/jsonwrite"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/go-shared/jsonwrite"
 	"os"
 	"path/filepath"
 	"time"
@@ -30,14 +30,14 @@ type helmManager struct {
 }
 
 // newHelmManager builds an action.Configuration that resolves k8s access the
-// same way the k8s.Manager does (explicit RUCODER_KUBECONFIG, then
+// same way the k8s.Manager does (explicit ZERGX_KUBECONFIG, then
 // in-cluster, then ~/.kube/config).
 func newHelmManager(namespace string) *helmManager {
 	settings := cli.New()
 	settings.SetNamespace(namespace)
 	// Respect the same explicit-kubeconfig override as k8s.Manager for
 	// verification instances.
-	if kc := os.Getenv("RUCODER_KUBECONFIG"); kc != "" {
+	if kc := os.Getenv("ZERGX_KUBECONFIG"); kc != "" {
 		settings.KubeConfig = kc
 	}
 	return &helmManager{namespace: namespace, settings: settings}

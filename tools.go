@@ -12,8 +12,8 @@ import (
 
 	abep "abep.dev/sdk"
 
-	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/k8s"
-	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/worker"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/k8s"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/worker"
 )
 
 // handlers returns the NATS tool handlers. Descriptions/schemas live in

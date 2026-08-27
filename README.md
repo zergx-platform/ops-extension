@@ -4,14 +4,14 @@ Go single-binary extension server replacing the original Rust `executor` +
 `sandbox-tools` + `builder` + `artifact-tools` services. No external binaries
 (`kubectl`/`buildctl`) — it uses `client-go`, `moby/buildkit`, and
 `gorilla/websocket` directly. Embeds an admin SPA (Svelte 5 + Tailwind 4,
-shared rucoder dark theme) served at `/`.
+shared zergx dark theme) served at `/`.
 
 ## Architecture
 
 - **Session-scoped sandboxes**: the agent injects `_session`
   (`org:repo:bookmark`) into every tool call; ops-extension resolves the
   workspace against **jj-server only**, lazily creates/reuses the session's
-  worker pod (k8s label `rucoder/container=<key>`), and syncs the repo tree
+  worker pod (k8s label `zergx/container=<key>`), and syncs the repo tree
   into it before execution.
 - **Overlay sync**: only the worker's `sync/files` endpoint is used — repo
   files are refreshed to the bookmark head; files that exist only in the
@@ -24,8 +24,8 @@ shared rucoder dark theme) served at `/`.
 ## Capabilities
 
 - **NATS extension** (tools + discovery) for the agent via
-  `forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go`.
-- **HTTP API** for the recoder-neo frontend (executor + builder surface).
+  `forgejo.develop.10.199.64.20.nip.io/zergx/extension-sdk-go`.
+- **HTTP API** for the zergx frontend (executor + builder surface).
 - **Dynamic worker pods** via `client-go` (no `kubectl`).
 - **Worker WebSocket RPC** via `gorilla/websocket`.
 - **Image builds** via `moby/buildkit` (no `buildctl`).
@@ -35,7 +35,7 @@ shared rucoder dark theme) served at `/`.
 `extension-sdk-go` is pulled from forgejo by git URL (not a local `replace`):
 
 ```
-forgejo.develop.10.199.64.20.nip.io/rucoder/extension-sdk-go v0.1.2
+forgejo.develop.10.199.64.20.nip.io/zergx/extension-sdk-go v0.1.2
 ```
 
 Build with private-module env:
@@ -60,7 +60,7 @@ Admin/UI: `/status`, `/sessions`, `/packages`, `/publish-specs`,
 
 `frontend/` — Svelte 5 (runes) + Vite + Tailwind 4 + bits-ui + lucide,
 zod-validated API client (schemas are the single source of truth for types).
-Same shared rucoder dark theme as jj-server/artifact. Build with
+Same shared zergx dark theme as jj-server/artifact. Build with
 `make frontend` (pnpm), embedded via `go:embed` — pages: Overview / Sessions /
 Sandbox console / Builds / Packages / Tools.
 
@@ -111,13 +111,13 @@ the agent sees the CLI error.
 | Env | Default |
 | --- | ------- |
 | `RUCODER_K8S_NAMESPACE` | `temp` |
-| `RUCODER_WORKER_IMAGE`  | `rucoder-artifact.temp.10.199.64.20.nip.io/rucoder-worker:v0.0.1` |
-| `RUCODER_BUILDKIT_ADDR` | `tcp://rucoder-buildkitd.temp.svc.cluster.local:1234` |
-| `RUCODER_ARTIFACT_URL`  | `http://rucoder-artifact.temp.svc.cluster.local:80` (packages + OCI + metadata) |
+| `RUCODER_WORKER_IMAGE`  | `zergx-artifact.temp.10.199.64.20.nip.io/zergx-worker:v0.0.1` |
+| `RUCODER_BUILDKIT_ADDR` | `tcp://zergx-buildkitd.temp.svc.cluster.local:1234` |
+| `RUCODER_ARTIFACT_URL`  | `http://zergx-artifact.temp.svc.cluster.local:80` (packages + OCI + metadata) |
 | `RUCODER_ARTIFACT_TOKEN`| *(empty — anonymous)* token for artifact write auth (Bearer / X-NuGet-ApiKey / npm _authToken per protocol) |
-| `RUCODER_JJ_SERVER_URL` | `http://rucoder-jj-server.temp.svc.cluster.local:80` (archive + contents + clone) |
+| `RUCODER_JJ_SERVER_URL` | `http://zergx-jj-server.temp.svc.cluster.local:80` (archive + contents + clone) |
 | `NATS_URL`              | `nats://nats.develop.svc.cluster.local:4222` |
 | `RUCODER_PORT`          | `8080` |
 
 > `RUCODER_REPO_MANAGER_URL` is still honored as a fallback for `RUCODER_JJ_SERVER_URL`.
-> The old `RUCODER_REGISTRY` / `RUCODER_REGISTRY_URL` (zot + rucoder-registry) are gone.
+> The old `RUCODER_REGISTRY` / `RUCODER_REGISTRY_URL` (zot + zergx-registry) are gone.

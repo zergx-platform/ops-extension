@@ -28,12 +28,12 @@ const (
 
 	// labelOwned marks objects created by this service (vs. Helm/system
 	// deployments), so ListDeployments only returns what ops-extension owns.
-	labelOwned = "rucoder/owned"
+	labelOwned = "zergx/owned"
 	// labelSession ties a sandbox pod or deployment to a session key (the
 	// deterministic hash of the raw "org:repo:bookmark" name).
-	labelSession = "rucoder/session"
+	labelSession = "zergx/session"
 	// annSession preserves the raw session name for display.
-	annSession = "rucoder/session"
+	annSession = "zergx/session"
 )
 
 // Config mirrors K8sConfig in the original executor.
@@ -147,12 +147,12 @@ type Manager struct {
 }
 
 // NewManager builds a Manager. Rest config resolution: explicit
-// RUCODER_KUBECONFIG (verification instances), then in-cluster service
+// ZERGX_KUBECONFIG (verification instances), then in-cluster service
 // account, then $KUBECONFIG / ~/.kube/config.
 func NewManager(cfg Config) (*Manager, error) {
 	var r *rest.Config
 	var err error
-	if explicit := os.Getenv("RUCODER_KUBECONFIG"); explicit != "" {
+	if explicit := os.Getenv("ZERGX_KUBECONFIG"); explicit != "" {
 		r, err = clientcmd.BuildConfigFromFlags("", explicit)
 	} else {
 		r, err = rest.InClusterConfig()
@@ -227,7 +227,7 @@ func (m *Manager) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 // EnsureContainer returns the running worker pod for a label, creating it if
 // needed (get-or-create). The label may be a raw session name ("org:repo:bm",
 // sanitized via labelKey) or an already-safe value (UUID). The raw name is
-// preserved in the rucoder/session annotation for display.
+// preserved in the zergx/session annotation for display.
 func (m *Manager) EnsureContainer(ctx context.Context, label, image string) (ContainerInfo, error) {
 	key := labelKey(label)
 	if info, err := m.FindContainer(ctx, key); err == nil {
@@ -249,7 +249,7 @@ func (m *Manager) EnsureContainer(ctx context.Context, label, image string) (Con
 			Namespace: m.config.Namespace,
 			Labels: map[string]string{
 				"app":               "sandbox",
-				"rucoder/container": key,
+				"zergx/container": key,
 				labelOwned:          "true",
 				labelSession:        key,
 			},
@@ -302,7 +302,7 @@ func (m *Manager) EnsureContainer(ctx context.Context, label, image string) (Con
 		Spec: corev1.ServiceSpec{
 			Selector: map[string]string{
 				"app":               "sandbox",
-				"rucoder/container": key,
+				"zergx/container": key,
 			},
 			Ports: []corev1.ServicePort{{
 				Name:       "http",
@@ -328,7 +328,7 @@ func (m *Manager) EnsureContainer(ctx context.Context, label, image string) (Con
 // an error when none exists.
 func (m *Manager) FindContainer(ctx context.Context, key string) (ContainerInfo, error) {
 	list, err := m.client.CoreV1().Pods(m.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app=sandbox,rucoder/container=" + key,
+		LabelSelector: "app=sandbox,zergx/container=" + key,
 	})
 	if err != nil {
 		return ContainerInfo{}, err
@@ -349,10 +349,10 @@ func containerInfoOf(p corev1.Pod) ContainerInfo {
 	}
 	session := p.Annotations[annSession]
 	if session == "" {
-		session = p.Labels["rucoder/container"]
+		session = p.Labels["zergx/container"]
 	}
 	return ContainerInfo{
-		ContainerID: p.Labels["rucoder/container"],
+		ContainerID: p.Labels["zergx/container"],
 		PodName:     p.Name,
 		Namespace:   p.Namespace,
 		WorkerURL:   url,
@@ -406,7 +406,7 @@ func (m *Manager) DestroyContainer(ctx context.Context, id string) error {
 		name = ""
 		for _, cand := range []string{id, labelKey(id)} {
 			if pods, lerr := m.client.CoreV1().Pods(m.config.Namespace).List(ctx, metav1.ListOptions{
-				LabelSelector: "app=sandbox,rucoder/container=" + cand,
+				LabelSelector: "app=sandbox,zergx/container=" + cand,
 			}); lerr == nil && len(pods.Items) > 0 {
 				name = pods.Items[0].Name
 				break

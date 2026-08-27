@@ -4,7 +4,7 @@ declare module '*.css' {
 }
 
 interface ImportMetaEnv {
-  readonly RUCODER_SERVICE: string
+  readonly ZERGX_SERVICE: string
 }
 
 interface ImportMeta {

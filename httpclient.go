@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/env"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/go-shared/env"
 	"strings"
 	"time"
 )
@@ -129,5 +129,5 @@ func redactURL(u string) string {
 
 // selfBase returns the HTTP base of this instance for self-invoking build.
 func selfBase() string {
-	return "http://127.0.0.1:" + env.Or("RUCODER_PORT", "8080")
+	return "http://127.0.0.1:" + env.Or("ZERGX_PORT", "8080")
 }

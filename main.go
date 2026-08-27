@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/jsonwrite"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/go-shared/jsonwrite"
 
-	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/env"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/go-shared/env"
 	"os"
 	"sync"
 
@@ -19,9 +19,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/buildkit"
-	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/k8s"
-	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/worker"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/buildkit"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/k8s"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/worker"
 )
 
 //go:embed manifest.yaml
@@ -49,32 +49,32 @@ type server struct {
 }
 
 func main() {
-	ns := env.Or("RUCODER_K8S_NAMESPACE", "temp")
-	img := env.Or("RUCODER_WORKER_IMAGE", "rucoder-artifact.temp.10.199.64.20.nip.io/rucoder-worker:v0.0.1")
+	ns := env.Or("ZERGX_K8S_NAMESPACE", "temp")
+	img := env.Or("ZERGX_WORKER_IMAGE", "rucoder-artifact.temp.10.199.64.20.nip.io/zergx-worker:v0.0.1")
 	natsURL := env.Or("NATS_URL", "nats://nats.develop.svc.cluster.local:4222")
-	port := env.Or("RUCODER_PORT", "8080")
-	buildkitAddr := env.Or("RUCODER_BUILDKIT_ADDR", "tcp://rucoder-buildkitd.temp.svc.cluster.local:1234")
+	port := env.Or("ZERGX_PORT", "8080")
+	buildkitAddr := env.Or("ZERGX_BUILDKIT_ADDR", "tcp://buildkitd.zergx.svc.cluster.local:1234")
 	// jj-server replaces the old repo-manager (archive + contents + clone).
-	// The cluster service is named rucoder-repo (jj-server is the binary).
-	jj := env.Or("RUCODER_JJ_SERVER_URL", env.Or("RUCODER_REPO_MANAGER_URL", "http://rucoder-repo.temp.svc.cluster.local:80"))
-	// Artifact registry replaces zot (OCI store) + rucoder-registry (metadata):
+	// The cluster service is named repo (jj-server is the binary).
+	jj := env.Or("ZERGX_JJ_SERVER_URL", env.Or("ZERGX_REPO_MANAGER_URL", "http://repo.zergx.svc.cluster.local:80"))
+	// Artifact registry replaces zot (OCI store) + the legacy registry (metadata):
 	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
 	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
 	// used for API calls and in-container CLI uploads.
-	artifact := trimTrailingSlash(env.Or("RUCODER_ARTIFACT_URL", "http://rucoder-artifact.temp.svc.cluster.local:80"))
+	artifact := trimTrailingSlash(env.Or("ZERGX_ARTIFACT_URL", "http://rucoder-artifact.temp.10.199.64.20.nip.io:80"))
 	// Image references (buildkit FROM/push) must go through the TLS ingress
 	// host configured as insecure in buildkitd's registry config — the svc
 	// host is plain HTTP which buildkit cannot pull/push to.
-	artifactImageHost := env.Or("RUCODER_ARTIFACT_IMAGE_HOST", "rucoder-artifact.temp.10.199.64.20.nip.io")
-	artifactToken := env.Or("RUCODER_ARTIFACT_TOKEN", "")
+	artifactImageHost := env.Or("ZERGX_ARTIFACT_IMAGE_HOST", "rucoder-artifact.temp.10.199.64.20.nip.io")
+	artifactToken := env.Or("ZERGX_ARTIFACT_TOKEN", "")
 
 	km, err := k8s.NewManager(k8s.Config{
 		Namespace:     ns,
 		WorkerImage:   img,
-		CPURequest:    env.Or("RUCODER_WORKER_CPU_REQUEST", ""),
-		CPULimit:      env.Or("RUCODER_WORKER_CPU_LIMIT", ""),
-		MemoryRequest: env.Or("RUCODER_WORKER_MEM_REQUEST", ""),
-		MemoryLimit:   env.Or("RUCODER_WORKER_MEM_LIMIT", ""),
+		CPURequest:    env.Or("ZERGX_WORKER_CPU_REQUEST", ""),
+		CPULimit:      env.Or("ZERGX_WORKER_CPU_LIMIT", ""),
+		MemoryRequest: env.Or("ZERGX_WORKER_MEM_REQUEST", ""),
+		MemoryLimit:   env.Or("ZERGX_WORKER_MEM_LIMIT", ""),
 	})
 	if err != nil {
 		slog.Error("k8s manager init failed", "svc", "ops-extension", "err", err)
@@ -92,7 +92,7 @@ func main() {
 		synced:            map[string]string{},
 	}
 
-	// Verification instances must set RUCODER_DISABLE_NATS=1. Tool-call and
+	// Verification instances must set ZERGX_DISABLE_NATS=1. Tool-call and
 	// variable subscriptions use queue groups keyed by the extension id, so a
 	// second replica with the same id would STEAL live tool calls away from
 	// the serving instance (and double-answer abep.discover, which has no
@@ -100,7 +100,7 @@ func main() {
 	// bus, such instances expose them over HTTP at POST /api/v1/tools/{name}
 	// with a JSON args body.
 	toolBridge := false
-	if os.Getenv("RUCODER_DISABLE_NATS") != "1" {
+	if os.Getenv("ZERGX_DISABLE_NATS") != "1" {
 		nbus, err := natsbus.Connect(natsURL)
 		if err != nil {
 			slog.Error("nats connect failed", "svc", "ops-extension", "err", err)
@@ -211,7 +211,7 @@ func (s *server) router(toolBridge bool) http.Handler {
 }
 
 // callTool bridges a NATS tool over HTTP for verification instances
-// (RUCODER_DISABLE_NATS=1). Body: JSON object of tool args.
+// (ZERGX_DISABLE_NATS=1). Body: JSON object of tool args.
 func (s *server) callTool(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	spec, ok := s.handlers()[name]

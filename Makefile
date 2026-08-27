@@ -29,4 +29,4 @@ check: fmt vet test
 
 ## image: build the container image (expects the shared-parent Dockerfile context)
 image:
-	podman build -f Dockerfile -t rucoder-ops-extension:dev ..
+	podman build -f Dockerfile -t zergx-ops-extension:dev ..

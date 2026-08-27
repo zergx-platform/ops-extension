@@ -379,7 +379,7 @@ export const api = {
       jsonInit('POST', b),
     ),
 
-  /** NATS tool bridge (verification instances only, RUCODER_DISABLE_NATS=1). */
+  /** NATS tool bridge (verification instances only, ZERGX_DISABLE_NATS=1). */
   callTool: (name: string, args: Record<string, unknown>) =>
     req(
       `/tools/${encodeURIComponent(name)}`,
