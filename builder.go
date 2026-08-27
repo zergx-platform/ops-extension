@@ -5,9 +5,14 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/jsonwrite"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -24,7 +29,7 @@ func builtinTemplates() []map[string]string {
 }
 
 func (s *server) containerfileTemplates(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{"templates": builtinTemplates()})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"templates": builtinTemplates()})
 }
 
 type buildBody struct {
@@ -67,7 +72,7 @@ func (s *server) fetchRepoArchive(ctx context.Context, org, repo, rev string) (s
 	if err != nil {
 		return "", err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := longClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -109,7 +114,7 @@ func (s *server) buildImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := s.startBuildTask(b.Tag, b)
-	writeJSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
+	jsonwrite.JSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
 }
 
 // extractTarGz expands a tar.gz stream into dest, optionally stripping the
@@ -124,14 +129,22 @@ func extractTarGz(r interface{ Read([]byte) (int, error) }, dest string, strip i
 	for {
 		hdr, err := tr.Next()
 		if err != nil {
-			if err.Error() == "EOF" {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err
 		}
 		name := hdr.Name
-		// Normalize: tar paths may carry "./" prefixes.
-		name = strings.TrimPrefix(name, "./")
+		// Normalize: tar paths may carry "./" prefixes and trailing slashes.
+		name = path.Clean(strings.TrimPrefix(name, "./"))
+		if name == "." || name == "/" {
+			continue // fully consumed by normalization
+		}
+		// Zip-slip defense: the cleaned entry path must stay a relative path
+		// that does not climb out of the destination.
+		if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
+			return fmt.Errorf("tar entry %q escapes destination directory", hdr.Name)
+		}
 		parts := strings.Split(name, "/")
 		if strip > 0 {
 			if len(parts) <= strip {

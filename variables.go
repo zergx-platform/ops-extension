@@ -5,7 +5,7 @@ import (
 
 	abep "abep.dev/sdk"
 
-	"rucoder-agent/ops-extension/internal/k8s"
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/k8s"
 )
 
 // publishSandboxVars projects the session's sandbox state into the shared KV

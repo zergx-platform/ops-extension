@@ -12,8 +12,8 @@ import (
 
 	abep "abep.dev/sdk"
 
-	"rucoder-agent/ops-extension/internal/k8s"
-	"rucoder-agent/ops-extension/internal/worker"
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/k8s"
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/worker"
 )
 
 // handlers returns the NATS tool handlers. Descriptions/schemas live in
@@ -113,7 +113,17 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 						go func(jobID, sid string) {
 							bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Minute)
 							defer bgCancel()
-							done, _ := worker.StreamJobOutput(bgCtx, workerURL, jobID, nil)
+							done, streamErr := worker.StreamJobOutput(bgCtx, workerURL, jobID, nil)
+							if streamErr != nil {
+								// Never report a fabricated "finished (exit 0)"
+								// when the stream broke — tell the agent the
+								// outcome is unknown and how to inspect it.
+								_ = s.ext.PublishMailboxEvent(context.Background(), sid, "event",
+									map[string]interface{}{"content": fmt.Sprintf(
+										"Background command stream failed (job %s): %v. The job itself may still be running; inspect it with sandbox-job-output or stop it with sandbox-job-kill.",
+										jobID, streamErr)})
+								return
+							}
 							msg := fmt.Sprintf("Background command finished (job %s, exit %d)", jobID, done.ExitCode)
 							if done.Stdout != "" {
 								msg += "\n" + done.Stdout
@@ -385,7 +395,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				if err != nil {
 					return "", nil, err
 				}
-				resp, err := http.DefaultClient.Do(req)
+				resp, err := defaultClient.Do(req)
 				if err != nil {
 					return "", nil, fmt.Errorf("helm-uninstall failed: %w", err)
 				}

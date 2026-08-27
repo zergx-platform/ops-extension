@@ -7,7 +7,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"rucoder-agent/ops-extension/internal/worker"
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/worker"
 )
 
 var wsUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}

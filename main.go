@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/jsonwrite"
+
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/env"
 	"os"
 	"sync"
 
@@ -15,9 +19,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"rucoder-agent/ops-extension/internal/buildkit"
-	"rucoder-agent/ops-extension/internal/k8s"
-	"rucoder-agent/ops-extension/internal/worker"
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/buildkit"
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/k8s"
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/ops-extension/internal/worker"
 )
 
 //go:embed manifest.yaml
@@ -45,33 +49,32 @@ type server struct {
 }
 
 func main() {
-	ns := envOr("RUCODER_K8S_NAMESPACE", "temp")
-	img := envOr("RUCODER_WORKER_IMAGE", "recoder-dev002.develop.10.199.64.20.nip.io/rucoder-worker:dev")
-	natsURL := envOr("NATS_URL", "nats://nats.develop.svc.cluster.local:4222")
-	port := envOr("RUCODER_PORT", "8080")
-	portValue = port
-	buildkitAddr := envOr("RUCODER_BUILDKIT_ADDR", "tcp://rucoder-buildkitd.temp.svc.cluster.local:1234")
+	ns := env.Or("RUCODER_K8S_NAMESPACE", "temp")
+	img := env.Or("RUCODER_WORKER_IMAGE", "recoder-dev002.develop.10.199.64.20.nip.io/rucoder-worker:dev")
+	natsURL := env.Or("NATS_URL", "nats://nats.develop.svc.cluster.local:4222")
+	port := env.Or("RUCODER_PORT", "8080")
+	buildkitAddr := env.Or("RUCODER_BUILDKIT_ADDR", "tcp://rucoder-buildkitd.temp.svc.cluster.local:1234")
 	// jj-server replaces the old repo-manager (archive + contents + clone).
 	// The cluster service is named rucoder-repo (jj-server is the binary).
-	jj := envOr("RUCODER_JJ_SERVER_URL", envOr("RUCODER_REPO_MANAGER_URL", "http://rucoder-repo.temp.svc.cluster.local:80"))
+	jj := env.Or("RUCODER_JJ_SERVER_URL", env.Or("RUCODER_REPO_MANAGER_URL", "http://rucoder-repo.temp.svc.cluster.local:80"))
 	// Artifact registry replaces zot (OCI store) + rucoder-registry (metadata):
 	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
 	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
 	// used for API calls and in-container CLI uploads.
-	artifact := trimTrailingSlash(envOr("RUCODER_ARTIFACT_URL", "http://rucoder-artifact.temp.svc.cluster.local:80"))
+	artifact := trimTrailingSlash(env.Or("RUCODER_ARTIFACT_URL", "http://rucoder-artifact.temp.svc.cluster.local:80"))
 	// Image references (buildkit FROM/push) must go through the TLS ingress
 	// host configured as insecure in buildkitd's registry config — the svc
 	// host is plain HTTP which buildkit cannot pull/push to.
-	artifactImageHost := envOr("RUCODER_ARTIFACT_IMAGE_HOST", "rucoder-artifact.temp.10.199.64.20.nip.io")
-	artifactToken := envOr("RUCODER_ARTIFACT_TOKEN", "")
+	artifactImageHost := env.Or("RUCODER_ARTIFACT_IMAGE_HOST", "rucoder-artifact.temp.10.199.64.20.nip.io")
+	artifactToken := env.Or("RUCODER_ARTIFACT_TOKEN", "")
 
 	km, err := k8s.NewManager(k8s.Config{
 		Namespace:     ns,
 		WorkerImage:   img,
-		CPURequest:    envOr("RUCODER_WORKER_CPU_REQUEST", ""),
-		CPULimit:      envOr("RUCODER_WORKER_CPU_LIMIT", ""),
-		MemoryRequest: envOr("RUCODER_WORKER_MEM_REQUEST", ""),
-		MemoryLimit:   envOr("RUCODER_WORKER_MEM_LIMIT", ""),
+		CPURequest:    env.Or("RUCODER_WORKER_CPU_REQUEST", ""),
+		CPULimit:      env.Or("RUCODER_WORKER_CPU_LIMIT", ""),
+		MemoryRequest: env.Or("RUCODER_WORKER_MEM_REQUEST", ""),
+		MemoryLimit:   env.Or("RUCODER_WORKER_MEM_LIMIT", ""),
 	})
 	if err != nil {
 		slog.Error("k8s manager init failed", "svc", "ops-extension", "err", err)
@@ -89,11 +92,13 @@ func main() {
 		synced:            map[string]string{},
 	}
 
-	// Verification instances must set RUCODER_DISABLE_NATS=1: the SDK uses
-	// plain Subscribe (no queue groups), so a second replica on the same NATS
-	// would receive duplicate tool.call messages alongside the live service.
-	// To keep the tools testable, such instances expose them over HTTP at
-	// POST /api/v1/tools/{name} with a JSON args body.
+	// Verification instances must set RUCODER_DISABLE_NATS=1. Tool-call and
+	// variable subscriptions use queue groups keyed by the extension id, so a
+	// second replica with the same id would STEAL live tool calls away from
+	// the serving instance (and double-answer abep.discover, which has no
+	// queue group by design). To keep the tools testable without joining the
+	// bus, such instances expose them over HTTP at POST /api/v1/tools/{name}
+	// with a JSON args body.
 	toolBridge := false
 	if os.Getenv("RUCODER_DISABLE_NATS") != "1" {
 		nbus, err := natsbus.Connect(natsURL)
@@ -224,14 +229,7 @@ func (s *server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": out})
-}
-
-func envOr(k, d string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return d
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": out})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
@@ -241,7 +239,7 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]interface{}{"ok": false, "error": msg})
+	jsonwrite.JSON(w, code, map[string]interface{}{"ok": false, "error": msg})
 }
 
 // resolveWorkerURL finds the worker URL for a container ID.

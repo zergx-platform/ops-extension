@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/jsonwrite"
 	"os"
 	"path/filepath"
 	"sort"
@@ -255,7 +257,7 @@ func (s *server) buildsList(w http.ResponseWriter, r *http.Request) {
 		sj, _ := out[j]["started_at"].(time.Time)
 		return si.After(sj)
 	})
-	writeJSON(w, http.StatusOK, map[string]interface{}{"builds": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"builds": out})
 }
 
 // buildGet returns one task's status plus its full log.
@@ -266,7 +268,7 @@ func (s *server) buildGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := v.(*buildTask)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
 		"build": t.summary(),
 		"logs":  t.snapshotLogs(),
 	})

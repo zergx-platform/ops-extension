@@ -62,7 +62,8 @@ func (s *server) resolveWorkspace(ctx context.Context, args map[string]interface
 
 // lookupWorkspace resolves the bookmark head via jj-server, with a short
 // cache to keep the hot path (every sandbox tool call) free of extra round
-// trips while a call still notices bookmark moves quickly.
+// trips while a call still notices bookmark moves quickly. Expired entries
+// are swept on every miss so the map cannot grow unbounded across sessions.
 func (s *server) lookupWorkspace(ctx context.Context, sid, org, repo, bm string) (workspace, error) {
 	s.wsMu.Lock()
 	if e, ok := s.wsCache[sid]; ok && time.Now().Before(e.expires) {
@@ -70,6 +71,7 @@ func (s *server) lookupWorkspace(ctx context.Context, sid, org, repo, bm string)
 		s.wsMu.Unlock()
 		return ws, nil
 	}
+	s.sweepExpiredLocked()
 	s.wsMu.Unlock()
 
 	rev, err := s.jjBookmarkHead(ctx, org, repo, bm)
@@ -81,6 +83,16 @@ func (s *server) lookupWorkspace(ctx context.Context, sid, org, repo, bm string)
 	s.wsCache[sid] = wsCacheEntry{ws: ws, expires: time.Now().Add(30 * time.Second)}
 	s.wsMu.Unlock()
 	return ws, nil
+}
+
+// sweepExpiredLocked drops expired cache entries; caller holds wsMu.
+func (s *server) sweepExpiredLocked() {
+	now := time.Now()
+	for k, e := range s.wsCache {
+		if !now.Before(e.expires) {
+			delete(s.wsCache, k)
+		}
+	}
 }
 
 // invalidateWorkspace drops the cached resolution (e.g. after sandbox-port
@@ -196,7 +208,7 @@ func (s *server) syncToURL(ctx context.Context, workerBase string, ws workspace)
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := longClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("fetch archive: %w", err)
 	}
@@ -216,7 +228,7 @@ func (s *server) syncToURL(ctx context.Context, workerBase string, ws workspace)
 		return err
 	}
 	sreq.Header.Set("Content-Type", "application/gzip")
-	sresp, err := http.DefaultClient.Do(sreq)
+	sresp, err := longClient.Do(sreq)
 	if err != nil {
 		return fmt.Errorf("worker sync: %w", err)
 	}

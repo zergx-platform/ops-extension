@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/jsonwrite"
 	"os"
 	"path/filepath"
 	"time"
@@ -280,7 +282,7 @@ func (s *server) helmInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := s.startHelmInstall(b)
-	writeJSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
+	jsonwrite.JSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
 }
 
 // helmList returns all releases in the namespace.
@@ -295,7 +297,7 @@ func (s *server) helmList(w http.ResponseWriter, r *http.Request) {
 	for _, rel := range rels {
 		out = append(out, releaseSummary(rel))
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"releases": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"releases": out})
 }
 
 // helmStatus returns one release's status.
@@ -307,7 +309,7 @@ func (s *server) helmStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"release": releaseSummary(rel)})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"release": releaseSummary(rel)})
 }
 
 // helmValues returns one release's computed values.
@@ -319,7 +321,7 @@ func (s *server) helmValues(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"values": vals})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"values": vals})
 }
 
 // helmUninstall removes a release.
@@ -330,7 +332,7 @@ func (s *server) helmUninstall(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }
 
 // helmRollback reverts a release to a previous revision (0 = previous).
@@ -345,5 +347,5 @@ func (s *server) helmRollback(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }

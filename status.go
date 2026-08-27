@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/jsonwrite"
 	"sort"
 	"time"
 
@@ -24,7 +26,7 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return map[string]interface{}{"name": name, "ok": false, "error": err.Error()}
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := defaultClient.Do(req)
 		if err != nil {
 			return map[string]interface{}{"name": name, "ok": false, "error": err.Error()}
 		}
@@ -40,7 +42,7 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	deps = append(deps, map[string]interface{}{"name": "buildkitd", "ok": bkOK})
 
 	containers, _ := s.k8s.ListContainers(ctx)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
 		"ok":        true,
 		"version":   version,
 		"deps":      deps,
@@ -75,7 +77,7 @@ func (s *server) sandboxesList(w http.ResponseWriter, r *http.Request) {
 			"synced_rev":   synced[c.ContainerID],
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"sandboxes": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"sandboxes": out})
 }
 
 // sandboxGet returns one session's sandbox pod plus the deployments it owns.
@@ -122,7 +124,7 @@ func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
 		"sandbox":     sandbox,
 		"deployments": outDeps,
 	})
@@ -149,7 +151,7 @@ func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
 			"resources": d.Resources,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"deployments": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"deployments": out})
 }
 
 // deploymentPods returns the pods of one deployment.
@@ -172,7 +174,7 @@ func (s *server) deploymentPods(w http.ResponseWriter, r *http.Request) {
 			"restarts": p.Restarts,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"pods": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"pods": out})
 }
 
 // deploymentStatus reports the rollout state of one deployment.
@@ -183,7 +185,7 @@ func (s *server) deploymentStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
 		"observed_generation":  st.ObservedGeneration,
 		"updated_replicas":     st.UpdatedReplicas,
 		"ready_replicas":       st.ReadyReplicas,
@@ -200,7 +202,7 @@ func (s *server) deploymentDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }
 
 // deploymentRestart triggers a rolling restart (bumps the restartedAt
@@ -211,7 +213,7 @@ func (s *server) deploymentRestart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }
 
 // deploymentScale sets the replica count.
@@ -225,7 +227,7 @@ func (s *server) deploymentScale(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "replicas": b.Replicas})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true, "replicas": b.Replicas})
 }
 
 // deploymentRollback rolls back to a previous revision (0 = previous).
@@ -239,7 +241,7 @@ func (s *server) deploymentRollback(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }
 
 // deploymentEvents lists k8s events for a deployment (rollout debugging).
@@ -259,7 +261,7 @@ func (s *server) deploymentEvents(w http.ResponseWriter, r *http.Request) {
 			"age":     e.Age,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"events": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"events": out})
 }
 
 // deploymentRevisions lists the ReplicaSet revisions of a deployment.
@@ -280,7 +282,7 @@ func (s *server) deploymentRevisions(w http.ResponseWriter, r *http.Request) {
 			"age":      r.Age,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"revisions": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"revisions": out})
 }
 
 // packagesList proxies the artifact registry's package list (avoids CORS and
@@ -321,7 +323,7 @@ func (s *server) publishSpecsHandler(w http.ResponseWriter, r *http.Request) {
 		out = append(out, specOut{Protocol: proto, Args: spec.args, Required: spec.required})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Protocol < out[j].Protocol })
-	writeJSON(w, http.StatusOK, map[string]interface{}{"specs": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"specs": out})
 }
 
 // packagesPublish is the HTTP face of the package-publish tool.
@@ -357,5 +359,5 @@ func (s *server) packagesPublish(w http.ResponseWriter, r *http.Request) {
 		File:       b.File,
 		Dockerfile: b.Dockerfile,
 	})
-	writeJSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
+	jsonwrite.JSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
 }

@@ -7,8 +7,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"forgejo.develop.10.199.64.20.nip.io/rucoder/go-shared/env"
 	"strings"
 	"time"
+)
+
+// Shared HTTP clients: one for regular JSON calls, one long-lived for
+// archive fetches/syncs that stream large payloads. Replaces the previous mix
+// of per-call clients and http.DefaultClient (which has no timeout).
+var (
+	defaultClient = &http.Client{Timeout: 60 * time.Second}
+	longClient    = &http.Client{Timeout: 15 * time.Minute}
 )
 
 // httpGetJSON fetches a URL and returns the pretty-printed JSON body.
@@ -17,7 +27,7 @@ func (s *server) httpGetJSON(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := defaultClient
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -44,7 +54,7 @@ func (s *server) httpPostJSON(ctx context.Context, url string, body interface{})
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := defaultClient
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -71,7 +81,7 @@ func (s *server) httpPutJSON(ctx context.Context, url string, body interface{}) 
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := defaultClient
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -93,7 +103,7 @@ func (s *server) httpGetRaw(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := defaultClient
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -119,7 +129,5 @@ func redactURL(u string) string {
 
 // selfBase returns the HTTP base of this instance for self-invoking build.
 func selfBase() string {
-	return "http://127.0.0.1:" + portValue
+	return "http://127.0.0.1:" + env.Or("RUCODER_PORT", "8080")
 }
-
-var portValue = "8080"
