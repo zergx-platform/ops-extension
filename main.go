@@ -49,7 +49,7 @@ type server struct {
 }
 
 func main() {
-	ns := env.Or("ZERGX_K8S_NAMESPACE", "temp")
+	ns := env.Or("ZERGX_K8S_NAMESPACE", "zergx")
 	img := env.Or("ZERGX_WORKER_IMAGE", "artifact.zergx.svc.cluster.local/zergx-worker:v0.0.1")
 	natsURL := env.Or("NATS_URL", "nats://nats.develop.svc.cluster.local:4222")
 	port := env.Or("ZERGX_PORT", "8080")
@@ -61,7 +61,7 @@ func main() {
 	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
 	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
 	// used for API calls and in-container CLI uploads.
-	artifact := trimTrailingSlash(env.Or("ZERGX_ARTIFACT_URL", "http://artifact.zergx.svc.cluster.local:80"))
+	artifact := trimTrailingSlash(env.Or("ZERGX_ARTIFACT_URL", "http://artifact.zergx.svc.cluster.local"))
 	// Image references (buildkit FROM/push) must go through the TLS ingress
 	// host configured as insecure in buildkitd's registry config — the svc
 	// host is plain HTTP which buildkit cannot pull/push to.
