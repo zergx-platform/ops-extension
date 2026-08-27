@@ -37,10 +37,24 @@ type buildBody struct {
 	Repo       string `json:"repo"`
 	Bookmark   string `json:"bookmark"`
 	Tag        string `json:"tag"`
+	// ImageTag overrides the image reference tag. It decouples the source
+	// revision (bookmark) from the image tag so releases can pin immutable
+	// semver tags (e.g. v0.0.1) instead of the floating :dev. When empty the
+	// historical behavior of tagging by bookmark is preserved.
+	ImageTag   string `json:"image_tag"`
 	Dockerfile string `json:"dockerfile"`
 	Push       bool   `json:"push"`
 	Raw        bool   `json:"raw"`
 	NoCache    bool   `json:"no_cache"`
+}
+
+// ImageRefTag returns the image tag to append to the reference, preferring an
+// explicit ImageTag over the bookmark/floating default.
+func (b buildBody) ImageRefTag() string {
+	if b.ImageTag != "" {
+		return b.ImageTag
+	}
+	return b.BookmarkOrDefault()
 }
 
 // ForceNoCache resolves the effective no-cache flag. The raw-content build

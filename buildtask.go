@@ -219,7 +219,7 @@ func (s *server) runBuildTask(t *buildTask, b buildBody) {
 			if err := os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(b.Dockerfile), 0o644); err != nil {
 				return "", err
 			}
-			fullTag := fmt.Sprintf("%s/%s:%s", s.artifactImageHost, b.Tag, b.BookmarkOrDefault())
+			fullTag := fmt.Sprintf("%s/%s:%s", s.artifactImageHost, b.Tag, b.ImageRefTag())
 			return s.buildkit.Build(ctx, tmpDir, "Dockerfile", fullTag, onStatus, b.ForceNoCache())
 		}
 		tmpDir, err := s.fetchRepoArchive(ctx, b.Org, b.Repo, b.Bookmark)
@@ -227,7 +227,7 @@ func (s *server) runBuildTask(t *buildTask, b buildBody) {
 			return "", err
 		}
 		defer os.RemoveAll(tmpDir)
-		fullTag := fmt.Sprintf("%s/%s:%s", s.artifactImageHost, b.Tag, b.Bookmark)
+		fullTag := fmt.Sprintf("%s/%s:%s", s.artifactImageHost, b.Tag, b.ImageRefTag())
 		df := b.Dockerfile
 		if df == "" {
 			df = "Dockerfile"
