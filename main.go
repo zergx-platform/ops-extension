@@ -50,7 +50,7 @@ type server struct {
 
 func main() {
 	ns := env.Or("RUCODER_K8S_NAMESPACE", "temp")
-	img := env.Or("RUCODER_WORKER_IMAGE", "recoder-dev002.develop.10.199.64.20.nip.io/rucoder-worker:dev")
+	img := env.Or("RUCODER_WORKER_IMAGE", "rucoder-artifact.temp.10.199.64.20.nip.io/rucoder-worker:v0.0.1")
 	natsURL := env.Or("NATS_URL", "nats://nats.develop.svc.cluster.local:4222")
 	port := env.Or("RUCODER_PORT", "8080")
 	buildkitAddr := env.Or("RUCODER_BUILDKIT_ADDR", "tcp://rucoder-buildkitd.temp.svc.cluster.local:1234")
