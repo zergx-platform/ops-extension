@@ -34,7 +34,7 @@ type server struct {
 	artifact          string // artifact registry base URL (packages + OCI + metadata)
 	artifactImageHost string // TLS ingress host for image refs (FROM/push via buildkit)
 	artifactToken     string // optional bearer/basic token for artifact write auth
-	jj                string // jj-server URL (repo archive + contents + clone)
+	jj                string // jjlab URL (repo archive + contents + clone)
 
 	wsMu    sync.Mutex              // guards wsCache
 	wsCache map[string]wsCacheEntry // session -> workspace (short TTL)
@@ -54,9 +54,9 @@ func main() {
 	natsURL := env.Or("NATS_URL", "nats://nats.develop.svc.cluster.local:4222")
 	port := env.Or("ZERGX_PORT", "8080")
 	buildkitAddr := env.Or("ZERGX_BUILDKIT_ADDR", "tcp://buildkitd.zergx.svc.cluster.local:1234")
-	// jj-server replaces the old repo-manager (archive + contents + clone).
-	// The cluster service is named repo (jj-server is the binary).
-	jj := env.Or("ZERGX_JJ_SERVER_URL", env.Or("ZERGX_REPO_MANAGER_URL", "http://repo.zergx.svc.cluster.local:80"))
+	// jjlab replaces the old repo-manager (archive + contents + clone).
+	// The cluster service is named repo (jjlab is the binary).
+	jj := env.Or("ZERGX_JJ_SERVER_URL", env.Or("ZERGX_REPO_MANAGER_URL", "http://jjlab.zergx.svc.cluster.local:80"))
 	// Artifact registry replaces zot (OCI store) + the legacy registry (metadata):
 	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
 	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base

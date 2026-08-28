@@ -202,7 +202,7 @@ type helmInstallBody struct {
 	Chart       string                 `json:"chart"` // local dir path, or chart ref
 	Version     string                 `json:"version,omitempty"`
 	Values      map[string]interface{} `json:"values,omitempty"`
-	// repo-mode: chart lives in a repo checkout fetched from jj-server.
+	// repo-mode: chart lives in a repo checkout fetched from jjlab.
 	Org      string `json:"org,omitempty"`
 	Repo     string `json:"repo,omitempty"`
 	Bookmark string `json:"bookmark,omitempty"`

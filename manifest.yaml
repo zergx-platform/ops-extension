@@ -191,7 +191,7 @@ tools:
       type: object
       properties: {}
   - name: pull-git-repo
-    description: Clone a remote git repository into jj-server local storage (org 'external').
+    description: Clone a remote git repository into jjlab local storage (org 'external').
     input_schema:
       type: object
       properties:

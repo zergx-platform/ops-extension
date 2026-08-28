@@ -3,7 +3,7 @@
 // Instead of hand-writing HTTP clients for every registry protocol, each
 // protocol gets a containerfile template that runs the official CLI (or a
 // minimal uploader) inside a buildkit build with no image export — only the
-// RUN side effects (the publish) matter. The repo checkout from jj-server is
+// RUN side effects (the publish) matter. The repo checkout from jjlab is
 // the build context.
 //
 // Base images are plain docker.io references: buildkitd resolves them through
@@ -315,7 +315,7 @@ func (s *server) publishPackage(ctx context.Context, protocol, org, repo, bookma
 		specArgs[a] = buildArgs[a]
 	}
 
-	// 1. Repo checkout from jj-server as build context.
+	// 1. Repo checkout from jjlab as build context.
 	tmpDir, err := s.fetchRepoArchive(ctx, org, repo, bookmark)
 	if err != nil {
 		return "", fmt.Errorf("publish context: %w", err)

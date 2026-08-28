@@ -74,7 +74,7 @@ func (b buildBody) BookmarkOrDefault() string {
 	return b.Bookmark
 }
 
-// fetchRepoArchive downloads the tar.gz of org/repo@rev from jj-server into a
+// fetchRepoArchive downloads the tar.gz of org/repo@rev from jjlab into a
 // fresh temp dir and returns its path (caller must RemoveAll it). The archive
 // has a single top-level "{repo}-{rev}" directory which is stripped, so build
 // contexts have the repo files at the root.

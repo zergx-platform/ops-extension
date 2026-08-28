@@ -36,7 +36,7 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 
 	deps := []map[string]interface{}{
 		check("artifact", s.artifact+"/v2/"),
-		check("jj-server", s.jj+"/api/v1/health"),
+		check("jjlab", s.jj+"/api/v1/health"),
 	}
 	bkOK := s.buildkit.Ping(ctx)
 	deps = append(deps, map[string]interface{}{"name": "buildkitd", "ok": bkOK})

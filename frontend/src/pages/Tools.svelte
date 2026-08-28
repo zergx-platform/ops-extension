@@ -51,7 +51,7 @@
     },
     {
       group: 'Repos',
-      tools: [['pull-git-repo', "Clone an external git repo into jj-server (org 'external')"]],
+      tools: [['pull-git-repo', "Clone an external git repo into jjlab (org 'external')"]],
     },
   ]
 </script>

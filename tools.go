@@ -20,7 +20,7 @@ import (
 // handlers returns the NATS tool handlers. Descriptions/schemas live in
 // manifest.yaml (the single declarative protocol source); each handler is
 // bound by tool name. Sandbox tools are session-scoped: ops-extension
-// resolves the workspace via jj-server, lazily creates/reuses the session's
+// resolves the workspace via jjlab, lazily creates/reuses the session's
 // worker pod, and syncs the repo tree into it (overlay-only, sandbox-only
 // files are never deleted) before running.
 func (s *server) handlers() map[string]abep.ToolSpec {
@@ -697,7 +697,7 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 		return "", fmt.Errorf("port sandbox read failed: %w", err)
 	}
 
-	// 2. Write to jj-server via Contents API (base64).
+	// 2. Write to jjlab via Contents API (base64).
 	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/%s/contents/%s",
 		s.jj, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo), urlPathEscape(sc.ws.bookmark), escapePath(repoPath))
 	body := map[string]interface{}{

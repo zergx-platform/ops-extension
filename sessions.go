@@ -36,8 +36,8 @@ type wsCacheEntry struct {
 
 // resolveWorkspace maps a tool call to its workspace. Priority: the
 // first-class `session_name` envelope field ("org:repo:bookmark", verified
-// against jj-server) → legacy `_org`/`_repo`/`_branch` args. ops-extension
-// talks to jj-server only — no repo-extension, no mapping table.
+// against jjlab) → legacy `_org`/`_repo`/`_branch` args. ops-extension
+// talks to jjlab only — no repo-extension, no mapping table.
 func (s *server) resolveWorkspace(ctx context.Context, args map[string]interface{}, sessionName string) (workspace, string, error) {
 	if sessionName != "" {
 		org, repo, bm, ok := parseSessionName(sessionName)
@@ -60,7 +60,7 @@ func (s *server) resolveWorkspace(ctx context.Context, args map[string]interface
 	return ws, sid, err
 }
 
-// lookupWorkspace resolves the bookmark head via jj-server, with a short
+// lookupWorkspace resolves the bookmark head via jjlab, with a short
 // cache to keep the hot path (every sandbox tool call) free of extra round
 // trips while a call still notices bookmark moves quickly. Expired entries
 // are swept on every miss so the map cannot grow unbounded across sessions.
@@ -103,7 +103,7 @@ func (s *server) invalidateWorkspace(sid string) {
 	s.wsMu.Unlock()
 }
 
-// jjBookmarkHead fetches a bookmark's target commit id from jj-server.
+// jjBookmarkHead fetches a bookmark's target commit id from jjlab.
 func (s *server) jjBookmarkHead(ctx context.Context, org, repo, bm string) (string, error) {
 	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/bookmarks", s.jj, urlPathEscape(org), urlPathEscape(repo))
 	body, err := s.httpGetRaw(ctx, u)

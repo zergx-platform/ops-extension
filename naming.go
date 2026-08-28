@@ -9,7 +9,7 @@ import (
 
 // Session names are derived from the workspace triple as `org:repo:bookmark`
 // (e.g. `acme:my.repo:feature-x`). Ported from repo-extension naming.go so
-// ops-extension resolves sessions against jj-server alone — no other service,
+// ops-extension resolves sessions against jjlab alone — no other service,
 // no mapping table. Components must never contain `:` themselves, which keeps
 // the derivation a strict bijection.
 
