@@ -51,7 +51,7 @@ type server struct {
 func main() {
 	ns := env.Or("ZERGX_K8S_NAMESPACE", "zergx")
 	img := env.Or("ZERGX_WORKER_IMAGE", "artifact.zergx.svc.cluster.local/zergx-worker:v0.0.1")
-	natsURL := env.Or("NATS_URL", "nats://nats.develop.svc.cluster.local:4222")
+	natsURL := env.Or("NATS_URL", "nats://nats.zergx.svc.cluster.local:4222")
 	port := env.Or("ZERGX_PORT", "8080")
 	buildkitAddr := env.Or("ZERGX_BUILDKIT_ADDR", "tcp://buildkitd.zergx.svc.cluster.local:1234")
 	// jjlab replaces the old repo-manager (archive + contents + clone).
