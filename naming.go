@@ -13,7 +13,7 @@ import (
 // no mapping table. Components must never contain `:` themselves, which keeps
 // the derivation a strict bijection.
 
-var componentRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+var componentRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$`)
 
 // validComponent reports whether s is acceptable as an org/repo/bookmark name.
 func validComponent(s string) bool {
@@ -25,6 +25,9 @@ func validComponent(s string) bool {
 	}
 	if strings.Contains(s, "..") {
 		return false // path traversal / jj rule
+	}
+	if strings.HasPrefix(s, "/") || strings.HasSuffix(s, "/") || strings.Contains(s, "//") {
+		return false // '//' or leading/trailing '/' would break URL segment round-trips
 	}
 	if strings.HasSuffix(s, ".") || strings.HasSuffix(s, ".lock") {
 		return false // jj/git ref rules
