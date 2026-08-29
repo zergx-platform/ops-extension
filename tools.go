@@ -300,7 +300,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err := json.Unmarshal([]byte(res), &submit); err != nil || submit.BuildID == "" {
 					return extension.ToolResultData{}, fmt.Errorf("container-build failed: no build_id in %s", res)
 				}
-				return s.awaitBuild(ctx, submit.BuildID)
+				return s.awaitBuild(ctx, submit.BuildID, callID)
 			},
 		},
 		"container-deploy": {
@@ -414,7 +414,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err := json.Unmarshal([]byte(res), &submit); err != nil || submit.BuildID == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-install failed: no build_id in %s", res)
 				}
-				return s.awaitBuild(ctx, submit.BuildID)
+				return s.awaitBuild(ctx, submit.BuildID, callID)
 			},
 		},
 		"helm-list": {

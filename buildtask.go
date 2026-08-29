@@ -1,6 +1,7 @@
 package main
 
 import (
+	abcprotocol "forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go"
 	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/extension"
 
 	"context"
@@ -342,7 +343,8 @@ func splitLines(s string) []string {
 // awaitBuild polls a submitted build task until it finishes, then returns a
 // human-readable result. Used by the NATS container-build tool so the agent
 // still gets a synchronous outcome even though the HTTP endpoint is async.
-func (s *server) awaitBuild(ctx context.Context, id string) (extension.ToolResultData, error) {
+func (s *server) awaitBuild(ctx context.Context, id, callID string) (extension.ToolResultData, error) {
+	start := time.Now()
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
@@ -351,6 +353,14 @@ func (s *server) awaitBuild(ctx context.Context, id string) (extension.ToolResul
 			return extension.ToolResultData{}, fmt.Errorf("build %s not found", id)
 		}
 		t := v.(*buildTask)
+		if s.ext != nil && t.State == "running" {
+			// progress telemetry: consumed by the orchestration/UI layer,
+			// never the LLM context
+			_ = s.ext.ReportProgress(ctx, callID, abcprotocol.ToolProgress{
+				Phase: protocolPtr("running"),
+				Text:  protocolPtr(fmt.Sprintf("%s %s running (%.0fs)", t.Kind, t.Tag, time.Since(start).Seconds())),
+			})
+		}
 		if t.State != "running" {
 			if t.Error != "" {
 				return extension.ToolResultData{}, fmt.Errorf("%s failed: %s", t.Kind, t.Error)
@@ -442,3 +452,5 @@ func (s *server) runPublishTask(t *buildTask, b publishTaskBody) {
 	t.append(buildLogLine{Stream: "publish", Line: res})
 	t.setResult(b.Protocol, "")
 }
+
+func protocolPtr(s string) *string { return &s }
