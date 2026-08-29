@@ -1,6 +1,8 @@
 package main
 
 import (
+	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/extension"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -340,24 +342,24 @@ func splitLines(s string) []string {
 // awaitBuild polls a submitted build task until it finishes, then returns a
 // human-readable result. Used by the NATS container-build tool so the agent
 // still gets a synchronous outcome even though the HTTP endpoint is async.
-func (s *server) awaitBuild(ctx context.Context, id string) (string, map[string]interface{}, error) {
+func (s *server) awaitBuild(ctx context.Context, id string) (extension.ToolResultData, error) {
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
 		v, ok := s.builds.Load(id)
 		if !ok {
-			return "", nil, fmt.Errorf("build %s not found", id)
+			return extension.ToolResultData{}, fmt.Errorf("build %s not found", id)
 		}
 		t := v.(*buildTask)
 		if t.State != "running" {
 			if t.Error != "" {
-				return "", nil, fmt.Errorf("%s failed: %s", t.Kind, t.Error)
+				return extension.ToolResultData{}, fmt.Errorf("%s failed: %s", t.Kind, t.Error)
 			}
-			return fmt.Sprintf("Finished %s %q", t.Kind, t.Tag), nil, nil
+			return extension.ToolResultData{Content: fmt.Sprintf("Finished %s %q", t.Kind, t.Tag)}, nil
 		}
 		select {
 		case <-ctx.Done():
-			return "", nil, ctx.Err()
+			return extension.ToolResultData{}, ctx.Err()
 		case <-tick.C:
 		}
 	}

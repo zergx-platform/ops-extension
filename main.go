@@ -14,8 +14,10 @@ import (
 	"os"
 	"sync"
 
-	abep "abep.dev/sdk"
-	natsbus "abep.dev/sdk/nats"
+	abcprotocol "forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go"
+	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/extension"
+	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/manifest"
+	natsbus "forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/transport/nats"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
@@ -29,7 +31,7 @@ var manifestYaml []byte
 
 type server struct {
 	k8s               *k8s.Manager
-	ext               *abep.Extension
+	ext               *extension.Extension
 	buildkit          *buildkit.Client
 	artifact          string // artifact registry base URL (packages + OCI + metadata)
 	artifactImageHost string // TLS ingress host for image refs (FROM/push via buildkit)
@@ -106,7 +108,7 @@ func main() {
 			slog.Error("nats connect failed", "svc", "ops-extension", "err", err)
 			os.Exit(1)
 		}
-		manifest, err := abep.ParseManifest(manifestYaml)
+		m, err := manifest.ParseManifest(manifestYaml)
 		if err != nil {
 			slog.Error("load manifest failed", "svc", "ops-extension", "err", err)
 			os.Exit(1)
@@ -114,25 +116,24 @@ func main() {
 
 		r := s.router(toolBridge)
 
-		if err := abep.Serve(
-			nbus,
-			manifest.Config(
-				s.handlers(),
-				map[string]abep.VariableSpec{
+		if err := extension.Serve(
+			extension.New(nbus, m.BuildConfig(manifest.Bindings{
+				Handlers: s.handlers(),
+				Variables: map[string]extension.VariableSpec{
 					"sandbox-id":     {Resolve: s.resolveSandboxID},
 					"sandbox-status": {Resolve: s.resolveSandboxStatus},
 				},
-				func(ctx context.Context, ev abep.LifecycleEvent) error {
+				OnLifecycle: func(ctx context.Context, ev abcprotocol.LifecycleEvent) error {
 					if ev.Kind == "deleted" {
 						s.clearSandboxVars(ctx, ev.SessionName)
 					}
 					return nil
 				},
-			),
-			abep.ServeOptions{
+			})),
+			extension.ServeOptions{
 				Handler: r,
 				Port:    port,
-				Run: func(runCtx context.Context, ext *abep.Extension) {
+				Run: func(runCtx context.Context, ext *extension.Extension) {
 					s.ext = ext
 					slog.Info("listening", "svc", "ops-extension", "addr", ":"+port, "buildkit", buildkitAddr, "artifact", artifact, "jj", jj)
 				},
@@ -224,7 +225,8 @@ func (s *server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid args body: "+err.Error())
 		return
 	}
-	out, _, err := spec.Execute(r.Context(), args, "http-verify", "")
+	res, err := spec.Execute(r.Context(), args, "http-verify", "")
+	out := res.Content
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

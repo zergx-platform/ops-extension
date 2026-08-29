@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	abep "abep.dev/sdk"
+	abcprotocol "forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go"
+	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/extension"
 
 	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/k8s"
 	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/worker"
@@ -23,21 +24,21 @@ import (
 // resolves the workspace via jjlab, lazily creates/reuses the session's
 // worker pod, and syncs the repo tree into it (overlay-only, sandbox-only
 // files are never deleted) before running.
-func (s *server) handlers() map[string]abep.ToolSpec {
-	return map[string]abep.ToolSpec{
+func (s *server) handlers() map[string]extension.ToolSpec {
+	return map[string]extension.ToolSpec{
 		"sandbox-run": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				command := strArg(args, "command")
 				if command == "" {
-					return "", nil, fmt.Errorf("sandbox-run: missing 'command'")
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-run: missing 'command'")
 				}
 				sc, err := s.ensureSandbox(ctx, args, sessionName, true)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				workerURL, err := s.resolveWorkerURL(ctx, sc.cid)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 
 				run := func(rev string) (worker.ExecuteResult, error) {
@@ -52,15 +53,15 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					if strings.Contains(err.Error(), "need_sync") {
 						s.markUnsynced(sc.cid)
 						if err := s.ensureSynced(ctx, sc.cid, sc.ws); err != nil {
-							return "", nil, err
+							return extension.ToolResultData{}, err
 						}
 						if res, err = run(sc.ws.rev); err != nil {
 							if res, err = run(""); err != nil {
-								return "", nil, fmt.Errorf("sandbox-run failed: %w", err)
+								return extension.ToolResultData{}, fmt.Errorf("sandbox-run failed: %w", err)
 							}
 						}
 					} else {
-						return "", nil, fmt.Errorf("sandbox-run failed: %w", err)
+						return extension.ToolResultData{}, fmt.Errorf("sandbox-run failed: %w", err)
 					}
 				}
 
@@ -70,7 +71,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				// The bus is model-facing and carries no streamed deltas, so
 				// the terminal tool result folds the captured output in; the
 				// UI reads live output via the gateway's per-worker SSE proxy.
-				timeoutMs := int(abep.ArgInt(args, "timeout_ms", 10000))
+				timeoutMs := int(abcprotocol.ArgInt(args, "timeout_ms", 10000))
 				if timeoutMs <= 0 {
 					timeoutMs = 10000
 				}
@@ -90,7 +91,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				select {
 				case sr := <-resultCh:
 					if sr.err != nil && !errors.Is(sr.err, context.DeadlineExceeded) {
-						return "", nil, fmt.Errorf("sandbox-run stream failed: %w", sr.err)
+						return extension.ToolResultData{}, fmt.Errorf("sandbox-run stream failed: %w", sr.err)
 					}
 					content := fmt.Sprintf("Command completed (job %s, exit %d)", res.JobID, sr.done.ExitCode)
 					if sr.done.Stdout != "" {
@@ -99,11 +100,11 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					if sr.done.Stderr != "" {
 						content += "\n[stderr]\n" + sr.done.Stderr
 					}
-					return content, map[string]interface{}{
+					return extension.ToolResultData{Content: content, Data: map[string]interface{}{
 						"job_id":       res.JobID,
 						"exit_code":    sr.done.ExitCode,
 						"backgrounded": false,
-					}, nil
+					}}, nil
 
 				case <-streamCtx.Done():
 					// Timed out: hand the job to a background watcher and return
@@ -139,129 +140,129 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					content := fmt.Sprintf(
 						"Command is still running in the background (job %s); it did not finish within %dms. It keeps running in the background and you will be notified on completion. Meanwhile you can inspect current output with sandbox-job-output, or stop it with sandbox-job-kill.",
 						res.JobID, timeoutMs)
-					return content, map[string]interface{}{
+					return extension.ToolResultData{Content: content, Data: map[string]interface{}{
 						"job_id":       res.JobID,
 						"backgrounded": true,
-					}, nil
+					}}, nil
 				}
 			},
 		},
 		"sandbox-read": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				path := strArg(args, "path")
 				sc, err := s.ensureSandbox(ctx, args, sessionName, true)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				data, err := s.sandboxFileRead(ctx, sc.cid, path)
 				if err != nil {
-					return "", nil, fmt.Errorf("sandbox-read failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-read failed: %w", err)
 				}
-				return string(data), nil, nil
+				return extension.ToolResultData{Content: string(data)}, nil
 			},
 		},
 		"sandbox-write": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				path := strArg(args, "path")
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				if err := s.sandboxFileWrite(ctx, sc.cid, path, []byte(strArg(args, "content"))); err != nil {
-					return "", nil, fmt.Errorf("sandbox-write failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-write failed: %w", err)
 				}
-				return fmt.Sprintf("Wrote sandbox file '%s'.", path), nil, nil
+				return extension.ToolResultData{Content: fmt.Sprintf("Wrote sandbox file '%s'.", path)}, nil
 			},
 		},
 		"sandbox-edit": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				path := strArg(args, "path")
 				startLine := intArg64(args, "start_line", 0)
 				endLine := intArg64(args, "end_line", 0)
 				content := strArg(args, "content")
 				sc, err := s.ensureSandbox(ctx, args, sessionName, true)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				v, err := s.sandboxEdit(ctx, sc.cid, path, startLine, endLine, content)
-				return v, nil, err
+				return extension.ToolResultData{Content: v}, err
 			},
 		},
 		"sandbox-job-list": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "jobs", map[string]interface{}{})
 				if err != nil {
-					return "", nil, fmt.Errorf("sandbox-job-list failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-list failed: %w", err)
 				}
-				return toJSON(res), nil, nil
+				return extension.ToolResultData{Content: toJSON(res)}, nil
 			},
 		},
 		"sandbox-job-output": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "job_output", jobArgs(args))
 				if err != nil {
-					return "", nil, fmt.Errorf("sandbox-job-output failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-output failed: %w", err)
 				}
-				return toJSON(res), nil, nil
+				return extension.ToolResultData{Content: toJSON(res)}, nil
 			},
 		},
 		"sandbox-job-wait": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "job_wait", jobArgs(args))
 				if err != nil {
-					return "", nil, fmt.Errorf("sandbox-job-wait failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-wait failed: %w", err)
 				}
-				return toJSON(res), nil, nil
+				return extension.ToolResultData{Content: toJSON(res)}, nil
 			},
 		},
 		"sandbox-job-stdin": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "job_stdin", map[string]interface{}{
 					"job_id": strArg(args, "job_id"),
 					"data":   strArg(args, "data"),
 				})
 				if err != nil {
-					return "", nil, fmt.Errorf("sandbox-job-stdin failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-stdin failed: %w", err)
 				}
-				return toJSON(res), nil, nil
+				return extension.ToolResultData{Content: toJSON(res)}, nil
 			},
 		},
 		"sandbox-job-kill": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "kill", map[string]interface{}{
 					"job_id": strArg(args, "job_id"),
 				})
 				if err != nil {
-					return "", nil, fmt.Errorf("sandbox-job-kill failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-kill failed: %w", err)
 				}
-				return toJSON(res), nil, nil
+				return extension.ToolResultData{Content: toJSON(res)}, nil
 			},
 		},
 		"sandbox-port": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				v, err := s.portFile(ctx, sc, args)
 				if err == nil {
@@ -269,14 +270,14 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					// call re-syncs and observes the ported file.
 					s.invalidateWorkspace(sc.session)
 				}
-				return v, nil, err
+				return extension.ToolResultData{Content: v}, err
 			},
 		},
 		"container-build": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				payload := map[string]interface{}{
 					"org":        ws.org,
@@ -291,19 +292,19 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				}
 				res, err := s.httpPostJSON(ctx, selfBase()+"/api/v1/images/build", payload)
 				if err != nil {
-					return "", nil, fmt.Errorf("container-build failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("container-build failed: %w", err)
 				}
 				var submit struct {
 					BuildID string `json:"build_id"`
 				}
 				if err := json.Unmarshal([]byte(res), &submit); err != nil || submit.BuildID == "" {
-					return "", nil, fmt.Errorf("container-build failed: no build_id in %s", res)
+					return extension.ToolResultData{}, fmt.Errorf("container-build failed: no build_id in %s", res)
 				}
 				return s.awaitBuild(ctx, submit.BuildID)
 			},
 		},
 		"container-deploy": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				image := strArg(args, "image")
 				name := strArg(args, "name")
 				if name == "" {
@@ -337,22 +338,22 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				rr := resourceRequestFromArgs(args)
 				reqs, err := rr.Requirements()
 				if err != nil {
-					return "", nil, fmt.Errorf("container-deploy failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("container-deploy failed: %w", err)
 				}
 				if err := s.k8s.EnsureDeployment(ctx, name, image, 1, 8080, nil, session, reqs); err != nil {
-					return "", nil, fmt.Errorf("container-deploy failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("container-deploy failed: %w", err)
 				}
-				return fmt.Sprintf("Deployed '%s' from %s.", name, image), nil, nil
+				return extension.ToolResultData{Content: fmt.Sprintf("Deployed '%s' from %s.", name, image)}, nil
 			},
 		},
 		"image-list": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				v, err := s.imageList(ctx)
-				return v, nil, err
+				return extension.ToolResultData{Content: v}, err
 			},
 		},
 		"deployment-list": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				all := boolArg(args, "all")
 				var list []k8s.DeploymentInfo
 				var err error
@@ -362,7 +363,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					list, err = s.k8s.FindDeploymentsBySession(ctx, sessionName)
 				}
 				if err != nil {
-					return "", nil, fmt.Errorf("deployment-list failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("deployment-list failed: %w", err)
 				}
 				out := make([]map[string]interface{}, 0, len(list))
 				for _, d := range list {
@@ -377,21 +378,21 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					})
 				}
 				if len(out) == 0 {
-					return "No deployments found.", map[string]interface{}{"deployments": out}, nil
+					return extension.ToolResultData{Content: "No deployments found.", Data: map[string]interface{}{"deployments": out}}, nil
 				}
 				b, _ := json.MarshalIndent(out, "", "  ")
-				return string(b), map[string]interface{}{"deployments": out}, nil
+				return extension.ToolResultData{Content: string(b), Data: map[string]interface{}{"deployments": out}}, nil
 			},
 		},
 		"helm-install": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				release := strArg(args, "release_name")
 				if release == "" {
-					return "", nil, fmt.Errorf("helm-install: missing 'release_name'")
+					return extension.ToolResultData{}, fmt.Errorf("helm-install: missing 'release_name'")
 				}
 				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				payload := map[string]interface{}{
 					"release_name": release,
@@ -405,64 +406,64 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				}
 				res, err := s.httpPostJSON(ctx, selfBase()+"/api/v1/helm/install", payload)
 				if err != nil {
-					return "", nil, fmt.Errorf("helm-install failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("helm-install failed: %w", err)
 				}
 				var submit struct {
 					BuildID string `json:"build_id"`
 				}
 				if err := json.Unmarshal([]byte(res), &submit); err != nil || submit.BuildID == "" {
-					return "", nil, fmt.Errorf("helm-install failed: no build_id in %s", res)
+					return extension.ToolResultData{}, fmt.Errorf("helm-install failed: no build_id in %s", res)
 				}
 				return s.awaitBuild(ctx, submit.BuildID)
 			},
 		},
 		"helm-list": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				v, err := s.httpGetJSON(ctx, selfBase()+"/api/v1/helm/releases")
-				return v, nil, err
+				return extension.ToolResultData{Content: v}, err
 			},
 		},
 		"helm-status": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				name := strArg(args, "release_name")
 				if name == "" {
-					return "", nil, fmt.Errorf("helm-status: missing 'release_name'")
+					return extension.ToolResultData{}, fmt.Errorf("helm-status: missing 'release_name'")
 				}
 				v, err := s.httpGetJSON(ctx, selfBase()+"/api/v1/helm/releases/"+urlPathEscape(name)+"/status")
-				return v, nil, err
+				return extension.ToolResultData{Content: v}, err
 			},
 		},
 		"helm-uninstall": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				name := strArg(args, "release_name")
 				if name == "" {
-					return "", nil, fmt.Errorf("helm-uninstall: missing 'release_name'")
+					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall: missing 'release_name'")
 				}
 				req, err := http.NewRequestWithContext(ctx, http.MethodDelete, selfBase()+"/api/v1/helm/releases/"+urlPathEscape(name), nil)
 				if err != nil {
-					return "", nil, err
+					return extension.ToolResultData{}, err
 				}
 				resp, err := defaultClient.Do(req)
 				if err != nil {
-					return "", nil, fmt.Errorf("helm-uninstall failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall failed: %w", err)
 				}
 				defer resp.Body.Close()
 				body, _ := io.ReadAll(resp.Body)
 				if resp.StatusCode >= 300 {
-					return "", nil, fmt.Errorf("helm-uninstall failed: HTTP %d %s", resp.StatusCode, string(body))
+					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall failed: HTTP %d %s", resp.StatusCode, string(body))
 				}
-				return fmt.Sprintf("Uninstalled helm release %q", name), nil, nil
+				return extension.ToolResultData{Content: fmt.Sprintf("Uninstalled helm release %q", name)}, nil
 			},
 		},
 		"package-publish": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				protocol := strArg(args, "protocol")
 				// Explicit org/repo win; else resolve the session workspace.
 				org, repo, bookmark := strArg(args, "org"), strArg(args, "repo"), strArg(args, "bookmark")
 				if org == "" || repo == "" {
 					ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
 					if err != nil {
-						return "", nil, err
+						return extension.ToolResultData{}, err
 					}
 					if org == "" {
 						org, repo = ws.org, ws.repo
@@ -474,29 +475,29 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 				res, err := s.publishPackage(ctx, protocol, org, repo, bookmark,
 					strArg(args, "name"), strArg(args, "version"),
 					strArg(args, "file"), strArg(args, "dockerfile_path"))
-				return res, nil, err
+				return extension.ToolResultData{Content: res}, err
 			},
 		},
 		"list-registry-packages": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				v, err := s.httpGetJSON(ctx, s.artifact+"/pkgs/system/packages")
-				return v, nil, err
+				return extension.ToolResultData{Content: v}, err
 			},
 		},
 		"list-containerfile-templates": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
-				return toJSON(builtinTemplates()), nil, nil
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+				return extension.ToolResultData{Content: toJSON(builtinTemplates())}, nil
 			},
 		},
 		"pull-git-repo": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (string, map[string]interface{}, error) {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				gitURL := strArg(args, "git_url")
 				if gitURL == "" {
-					return "", nil, fmt.Errorf("pull-git-repo: missing 'git_url'")
+					return extension.ToolResultData{}, fmt.Errorf("pull-git-repo: missing 'git_url'")
 				}
 				repo := inferRepoFromGitURL(gitURL)
 				if repo == "" {
-					return "", nil, fmt.Errorf("cannot infer repo name from %s", gitURL)
+					return extension.ToolResultData{}, fmt.Errorf("cannot infer repo name from %s", gitURL)
 				}
 				org := strArg(args, "org")
 				if org == "" {
@@ -508,7 +509,7 @@ func (s *server) handlers() map[string]abep.ToolSpec {
 					"git_url": gitURL,
 				}
 				v, err := s.httpPostJSON(ctx, s.jj+"/api/v1/repos/clone", body)
-				return v, nil, err
+				return extension.ToolResultData{Content: v}, err
 			},
 		},
 	}

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	abep "abep.dev/sdk"
+	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/extension"
 
 	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/k8s"
 )
@@ -56,4 +56,4 @@ func (s *server) clearSandboxVars(ctx context.Context, sessionName string) {
 	_ = s.ext.DeleteSessionVariables(ctx, sessionName)
 }
 
-var _ = abep.VariableSpec{}
+var _ = extension.VariableSpec{}

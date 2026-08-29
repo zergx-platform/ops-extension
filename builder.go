@@ -33,10 +33,10 @@ func (s *server) containerfileTemplates(w http.ResponseWriter, r *http.Request) 
 }
 
 type buildBody struct {
-	Org        string `json:"org"`
-	Repo       string `json:"repo"`
-	Bookmark   string `json:"bookmark"`
-	Tag        string `json:"tag"`
+	Org      string `json:"org"`
+	Repo     string `json:"repo"`
+	Bookmark string `json:"bookmark"`
+	Tag      string `json:"tag"`
 	// ImageTag overrides the image reference tag. It decouples the source
 	// revision (bookmark) from the image tag so releases can pin immutable
 	// semver tags (e.g. v0.0.1) instead of the floating :dev. When empty the

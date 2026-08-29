@@ -3,6 +3,7 @@ module forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension
 go 1.26.3
 
 require (
+	forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go v0.1.0
 	forgejo.develop.10.199.64.20.nip.io/zergx/go-shared v0.1.2
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/uuid v1.6.0
@@ -79,8 +80,6 @@ require (
 )
 
 require (
-	abep.dev/sdk v0.2.13
-	abep.dev/sdk/nats v0.2.6
 	github.com/Microsoft/go-winio v0.6.3-0.20251027160822-ad3df93bed29 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/containerd/api v1.11.1 // indirect

@@ -248,10 +248,10 @@ func (m *Manager) EnsureContainer(ctx context.Context, label, image string) (Con
 			Name:      name,
 			Namespace: m.config.Namespace,
 			Labels: map[string]string{
-				"app":               "sandbox",
+				"app":             "sandbox",
 				"zergx/container": key,
-				labelOwned:          "true",
-				labelSession:        key,
+				labelOwned:        "true",
+				labelSession:      key,
 			},
 			Annotations: map[string]string{
 				annSession: label,
@@ -301,7 +301,7 @@ func (m *Manager) EnsureContainer(ctx context.Context, label, image string) (Con
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: map[string]string{
-				"app":               "sandbox",
+				"app":             "sandbox",
 				"zergx/container": key,
 			},
 			Ports: []corev1.ServicePort{{
