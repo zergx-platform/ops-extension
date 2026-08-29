@@ -369,6 +369,9 @@ func (s *server) awaitBuild(ctx context.Context, id, callID string) (extension.T
 		}
 		select {
 		case <-ctx.Done():
+			if ctx.Err() == context.Canceled {
+				return extension.ToolResultData{}, fmt.Errorf("interrupted: %w", ctx.Err())
+			}
 			return extension.ToolResultData{}, ctx.Err()
 		case <-tick.C:
 		}
