@@ -27,7 +27,7 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io \
     GOINSECURE=forgejo.develop.10.199.64.20.nip.io \
     GOPRIVATE=forgejo.develop.10.199.64.20.nip.io \
-    GOPROXY=http://artifact.zergx.svc.cluster.local/pkgs/go|https://proxy.golang.org|direct,https://proxy.golang.org,direct \
+    GOPROXY=http://artifact.zergx.svc.cluster.local/pkgs/go|https://proxy.golang.org|direct \
     GOSUMDB=off \
     GONOSUMDB=abep.dev/sdk,abep.dev/sdk/nats,abep.dev/sdk/ws \
     GOFLAGS=-mod=mod
