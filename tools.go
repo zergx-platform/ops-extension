@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -279,28 +276,34 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
-				payload := map[string]interface{}{
-					"org":        ws.org,
-					"repo":       ws.repo,
-					"bookmark":   ws.bookmark,
-					"dockerfile": strArg(args, "dockerfile_path"),
-					"tag":        strArg(args, "tag"),
-					"image_tag":  strArg(args, "image_tag"),
-					"context":    strArg(args, "context"),
-					"push":       true,
-					"no_cache":   boolArg(args, "no_cache"),
+				image := strArg(args, "tag")
+				if image == "" {
+					return extension.ToolResultData{}, fmt.Errorf("container-build: missing 'tag' (image name)")
 				}
-				res, err := s.httpPostJSON(ctx, selfBase()+"/api/v1/images/build", payload)
+				// Tag defaults to the session bookmark (matching container-build's
+				// historical {tag}:{bookmark}); an explicit image_tag overrides it.
+				ref := image + ":" + ws.bookmarkOrDefault()
+				if imageTag := strArg(args, "image_tag"); imageTag != "" {
+					ref = image + ":" + imageTag
+				}
+				fullImage := s.artifactImageHost + "/" + ref
+				payload := map[string]interface{}{
+					"org":      ws.org,
+					"repo":     ws.repo,
+					"bookmark": ws.bookmark,
+					"image":    fullImage,
+					"export":   "push",
+					"no_cache": boolArg(args, "no_cache"),
+				}
+				if df := strArg(args, "dockerfile_path"); df != "" {
+					payload["dockerfile"] = df
+				}
+				id, err := s.opsSubmitBuild(ctx, payload)
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("container-build failed: %w", err)
 				}
-				var submit struct {
-					BuildID string `json:"build_id"`
-				}
-				if err := json.Unmarshal([]byte(res), &submit); err != nil || submit.BuildID == "" {
-					return extension.ToolResultData{}, fmt.Errorf("container-build failed: no build_id in %s", res)
-				}
-				return s.awaitBuild(ctx, submit.BuildID, callID)
+				out, err := s.awaitOpsTask(ctx, "build", fullImage, id)
+				return extension.ToolResultData{Content: out}, err
 			},
 		},
 		"container-deploy": {
@@ -310,24 +313,9 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if name == "" {
 					name = "app"
 				}
-				// Deployments belong to the calling session (if one is given),
-				// so GET /sandboxes/{session} can list them.
-				session := sessionName
-				if session == "" {
-					if org := strArg(args, "org"); org != "" {
-						bm := strArg(args, "bookmark")
-						if bm == "" {
-							bm = "main"
-						}
-						session = org + ":" + strArg(args, "repo") + ":" + bm
-					}
-				}
 				// Resolve a bare image name/tag into a fully-qualified reference
-				// against the in-cluster artifact registry. Otherwise kubelet
-				// interprets "example-server" as docker.io/library/example-server
-				// and fails the pull (ImagePullBackOff). A bare name defaults to
-				// the session's bookmark tag (matching container-build's default
-				// {tag}:{bookmark}), not "latest".
+				// against the in-cluster artifact registry (otherwise kubelet
+				// treats "example-server" as docker.io/library/example-server).
 				defaultTag := ""
 				if sessionName != "" {
 					if _, _, bm, ok := parseSessionName(sessionName); ok {
@@ -336,11 +324,25 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				image = s.qualifyImage(image, defaultTag)
 				rr := resourceRequestFromArgs(args)
-				reqs, err := rr.Requirements()
-				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("container-deploy failed: %w", err)
+				body := map[string]interface{}{
+					"name":  name,
+					"image": image,
+					"kind":  "deployment",
+					"ports": []map[string]interface{}{{"container": 8080, "service": 80}},
 				}
-				if err := s.k8s.EnsureDeployment(ctx, name, image, 1, 8080, nil, session, reqs); err != nil {
+				if env := envMapFromArgs(args); len(env) > 0 {
+					body["env"] = env
+				}
+				if rr.Requests != nil || rr.Limits != nil {
+					res := map[string]interface{}{}
+					if rr.Requests != nil {
+						res["cpu"] = rr.Requests.CPU
+						res["memory"] = rr.Requests.Memory
+					}
+					body["resources"] = res
+				}
+				_, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/services", body)
+				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("container-deploy failed: %w", err)
 				}
 				return extension.ToolResultData{Content: fmt.Sprintf("Deployed '%s' from %s.", name, image)}, nil
@@ -348,40 +350,25 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"image-list": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				v, err := s.imageList(ctx)
+				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/images")
 				return extension.ToolResultData{Content: v}, err
 			},
 		},
 		"deployment-list": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				all := boolArg(args, "all")
-				var list []k8s.DeploymentInfo
-				var err error
-				if all || sessionName == "" {
-					list, err = s.k8s.ListDeployments(ctx)
-				} else {
-					list, err = s.k8s.FindDeploymentsBySession(ctx, sessionName)
+				u := s.jj + "/api/v1/ops/services"
+				if !all && sessionName != "" {
+					// Session-scoped deployments live in the runtime namespace;
+					// jjlab lists by namespace + name, so filter client-side by
+					// the session-derived service name prefix.
+					u = s.jj + "/api/v1/ops/services"
 				}
+				v, err := s.httpGetJSON(ctx, u)
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("deployment-list failed: %w", err)
 				}
-				out := make([]map[string]interface{}, 0, len(list))
-				for _, d := range list {
-					out = append(out, map[string]interface{}{
-						"name":      d.Name,
-						"image":     d.Image,
-						"replicas":  d.Replicas,
-						"ready":     d.Ready,
-						"namespace": d.Namespace,
-						"ports":     d.Ports,
-						"session":   d.Session,
-					})
-				}
-				if len(out) == 0 {
-					return extension.ToolResultData{Content: "No deployments found.", Data: map[string]interface{}{"deployments": out}}, nil
-				}
-				b, _ := json.MarshalIndent(out, "", "  ")
-				return extension.ToolResultData{Content: string(b), Data: map[string]interface{}{"deployments": out}}, nil
+				return extension.ToolResultData{Content: v}, nil
 			},
 		},
 		"helm-install": {
@@ -390,36 +377,30 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if release == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-install: missing 'release_name'")
 				}
-				ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
-				if err != nil {
-					return extension.ToolResultData{}, err
+				// chart_path is repo-relative; the chart is resolved by jjlab's
+				// helm (a path/URL the caller provides).
+				chart := strArg(args, "chart_path")
+				if chart == "" {
+					chart = strArg(args, "chart")
 				}
 				payload := map[string]interface{}{
 					"release_name": release,
-					"org":          ws.org,
-					"repo":         ws.repo,
-					"bookmark":     ws.bookmark,
-					"chart_path":   strArg(args, "chart_path"),
+					"chart":        chart,
 				}
 				if v := args["values"]; v != nil {
 					payload["values"] = v
 				}
-				res, err := s.httpPostJSON(ctx, selfBase()+"/api/v1/helm/install", payload)
+				id, err := s.opsSubmitHelm(ctx, payload)
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("helm-install failed: %w", err)
 				}
-				var submit struct {
-					BuildID string `json:"build_id"`
-				}
-				if err := json.Unmarshal([]byte(res), &submit); err != nil || submit.BuildID == "" {
-					return extension.ToolResultData{}, fmt.Errorf("helm-install failed: no build_id in %s", res)
-				}
-				return s.awaitBuild(ctx, submit.BuildID, callID)
+				out, err := s.awaitOpsTask(ctx, "helm", release, id)
+				return extension.ToolResultData{Content: out}, err
 			},
 		},
 		"helm-list": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				v, err := s.httpGetJSON(ctx, selfBase()+"/api/v1/helm/releases")
+				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/helm/releases")
 				return extension.ToolResultData{Content: v}, err
 			},
 		},
@@ -429,7 +410,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if name == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-status: missing 'release_name'")
 				}
-				v, err := s.httpGetJSON(ctx, selfBase()+"/api/v1/helm/releases/"+urlPathEscape(name)+"/status")
+				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)+"/status")
 				return extension.ToolResultData{Content: v}, err
 			},
 		},
@@ -439,18 +420,9 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if name == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall: missing 'release_name'")
 				}
-				req, err := http.NewRequestWithContext(ctx, http.MethodDelete, selfBase()+"/api/v1/helm/releases/"+urlPathEscape(name), nil)
-				if err != nil {
-					return extension.ToolResultData{}, err
-				}
-				resp, err := defaultClient.Do(req)
+				_, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)+"/uninstall", map[string]interface{}{})
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall failed: %w", err)
-				}
-				defer resp.Body.Close()
-				body, _ := io.ReadAll(resp.Body)
-				if resp.StatusCode >= 300 {
-					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall failed: HTTP %d %s", resp.StatusCode, string(body))
 				}
 				return extension.ToolResultData{Content: fmt.Sprintf("Uninstalled helm release %q", name)}, nil
 			},
@@ -458,7 +430,6 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		"package-publish": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				protocol := strArg(args, "protocol")
-				// Explicit org/repo win; else resolve the session workspace.
 				org, repo, bookmark := strArg(args, "org"), strArg(args, "repo"), strArg(args, "bookmark")
 				if org == "" || repo == "" {
 					ws, _, err := s.resolveWorkspace(ctx, args, sessionName)
@@ -480,7 +451,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"list-registry-packages": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				v, err := s.httpGetJSON(ctx, s.artifact+"/pkgs/system/packages")
+				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/packages")
 				return extension.ToolResultData{Content: v}, err
 			},
 		},
@@ -608,6 +579,21 @@ func boolArg(args map[string]interface{}, k string) bool {
 		return v
 	}
 	return false
+}
+
+// envMapFromArgs lifts a flat set of args into a string→string env map for the
+// container-deploy service spec.
+func envMapFromArgs(args map[string]interface{}) map[string]string {
+	if raw, ok := args["env"].(map[string]interface{}); ok {
+		out := map[string]string{}
+		for k, v := range raw {
+			if s, ok := v.(string); ok {
+				out[k] = s
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 func toJSON(v interface{}) string {

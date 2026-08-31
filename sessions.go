@@ -27,6 +27,14 @@ type workspace struct {
 	rev      string // bookmark head commit id
 }
 
+// bookmarkOrDefault returns the bookmark or "latest" when empty.
+func (w workspace) bookmarkOrDefault() string {
+	if w.bookmark == "" {
+		return "latest"
+	}
+	return w.bookmark
+}
+
 type wsCacheEntry struct {
 	ws      workspace
 	expires time.Time
