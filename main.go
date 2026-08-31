@@ -37,6 +37,7 @@ type server struct {
 	artifactImageHost string // TLS ingress host for image refs (FROM/push via buildkit)
 	artifactToken     string // optional bearer/basic token for artifact write auth
 	jj                string // jjlab URL (repo archive + contents + clone)
+	jjToken           string // jjlab write token (Authorization: token <…>)
 
 	wsMu    sync.Mutex              // guards wsCache
 	wsCache map[string]wsCacheEntry // session -> workspace (short TTL)
@@ -69,6 +70,7 @@ func main() {
 	// host is plain HTTP which buildkit cannot pull/push to.
 	artifactImageHost := env.Or("ZERGX_ARTIFACT_IMAGE_HOST", "artifact.zergx.svc.cluster.local")
 	artifactToken := env.Or("ZERGX_ARTIFACT_TOKEN", "")
+	jjToken := env.Or("JJLAB_TOKEN", env.Or("ZERGX_JJLAB_TOKEN", "devtoken"))
 
 	km, err := k8s.NewManager(k8s.Config{
 		Namespace:     ns,
@@ -90,6 +92,7 @@ func main() {
 		artifactImageHost: artifactImageHost,
 		artifactToken:     artifactToken,
 		jj:                jj,
+		jjToken:           jjToken,
 		wsCache:           map[string]wsCacheEntry{},
 		synced:            map[string]string{},
 	}

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -105,24 +103,23 @@ func (s *server) invalidateWorkspace(sid string) {
 
 // jjBookmarkHead fetches a bookmark's target commit id from jjlab.
 func (s *server) jjBookmarkHead(ctx context.Context, org, repo, bm string) (string, error) {
-	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/bookmarks", s.jj, urlPathEscape(org), urlPathEscape(repo))
+	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/branches", s.jj, urlPathEscape(org), urlPathEscape(repo))
 	body, err := s.httpGetRaw(ctx, u)
 	if err != nil {
-		return "", fmt.Errorf("jj bookmarks %s/%s: %w", org, repo, err)
+		return "", fmt.Errorf("jj branches %s/%s: %w", org, repo, err)
 	}
 	var out struct {
-		Bookmarks []struct {
-			Branch   string `json:"branch"`
-			FullName string `json:"full_name"`
-			Target   string `json:"target"`
-		} `json:"bookmarks"`
+		Branches []struct {
+			Name string `json:"name"`
+			Sha  string `json:"sha"`
+		} `json:"branches"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return "", fmt.Errorf("jj bookmarks %s/%s: bad response: %w", org, repo, err)
+		return "", fmt.Errorf("jj branches %s/%s: bad response: %w", org, repo, err)
 	}
-	for _, b := range out.Bookmarks {
-		if b.Branch == bm || b.FullName == "refs/heads/"+bm {
-			return b.Target, nil
+	for _, b := range out.Branches {
+		if b.Name == bm {
+			return b.Sha, nil
 		}
 	}
 	return "", fmt.Errorf("bookmark %q not found in %s/%s", bm, org, repo)
@@ -202,12 +199,13 @@ func (s *server) setSyncedRev(cid, rev string) {
 // workspace root holds the repo files directly. Fully streaming (no temp
 // files): jj response → repack pipe → worker request body.
 func (s *server) syncToURL(ctx context.Context, workerBase string, ws workspace) error {
-	archiveURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/%s/archive",
+	archiveURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/archive/tarball/%s",
 		s.jj, urlPathEscape(ws.org), urlPathEscape(ws.repo), urlPathEscape(ws.rev))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
 	if err != nil {
 		return err
 	}
+	s.addAuth(req)
 	resp, err := longClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("fetch archive: %w", err)
@@ -217,13 +215,10 @@ func (s *server) syncToURL(ctx context.Context, workerBase string, ws workspace)
 		return fmt.Errorf("fetch archive: %d", resp.StatusCode)
 	}
 
-	pr, pw := io.Pipe()
-	go func() {
-		pw.CloseWithError(repackStripTop(resp.Body, pw))
-	}()
-
+	// jjlab's tarball is already flat (files at repo-root paths, no top-level
+	// directory), so stream it straight into the worker's sync/files endpoint.
 	syncURL := strings.TrimSuffix(workerBase, "/") + "/api/v1/sync/files?rev=" + url.QueryEscape(ws.rev)
-	sreq, err := http.NewRequestWithContext(ctx, http.MethodPost, syncURL, pr)
+	sreq, err := http.NewRequestWithContext(ctx, http.MethodPost, syncURL, resp.Body)
 	if err != nil {
 		return err
 	}
@@ -243,49 +238,9 @@ func (s *server) syncToURL(ctx context.Context, workerBase string, ws workspace)
 		Err   string `json:"error"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil || !out.OK {
-		return fmt.Errorf("worker sync: %s", orDefaultStr(string(body), err.Error()))
+		return fmt.Errorf("worker sync: %s", orDefaultStr(string(out.Err), "no ok"))
 	}
 	return nil
-}
-
-// repackStripTop streams a tar.gz, dropping the first path component of every
-// entry (like tar --strip-components=1). The top-level entry itself is
-// skipped entirely.
-func repackStripTop(r io.Reader, w io.Writer) error {
-	gz, err := gzip.NewReader(r)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	out := gzip.NewWriter(w)
-	defer out.Close()
-	tw := tar.NewWriter(out)
-	defer tw.Close()
-
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		name := strings.TrimPrefix(hdr.Name, "./")
-		parts := strings.SplitN(name, "/", 2)
-		if len(parts) < 2 || parts[1] == "" {
-			continue // the stripped top-level entry itself
-		}
-		hdr.Name = parts[1]
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		if hdr.Typeflag == tar.TypeReg {
-			if _, err := io.Copy(tw, tr); err != nil {
-				return err
-			}
-		}
-	}
 }
 
 func orDefaultStr(v, def string) string {

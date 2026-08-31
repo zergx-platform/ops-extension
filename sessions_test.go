@@ -14,14 +14,14 @@ import (
 	"testing"
 )
 
-// --- repackStripTop -----------------------------------------------------
+// --- flat tarball fixture (jjlab archive has no top-level dir) --------
 
-func buildArchive(top string, files map[string]string) []byte {
+func buildFlatArchive(files map[string]string) []byte {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	for name, content := range files {
-		hdr := &tar.Header{Name: top + "/" + name, Mode: 0o644, Size: int64(len(content))}
+		hdr := &tar.Header{Name: name, Mode: 0o644, Size: int64(len(content))}
 		_ = tw.WriteHeader(hdr)
 		_, _ = tw.Write([]byte(content))
 	}
@@ -47,62 +47,22 @@ func readArchive(data []byte) []string {
 	}
 }
 
-func TestRepackStripTop(t *testing.T) {
-	in := buildArchive("repo-main", map[string]string{
-		"README.md":      "hi",
-		"src/lib.rs":     "x",
-		"dir/nested.txt": "y",
-	})
-	var out bytes.Buffer
-	if err := repackStripTop(bytes.NewReader(in), &out); err != nil {
-		t.Fatal(err)
-	}
-	names := readArchive(out.Bytes())
-	want := map[string]bool{"README.md": true, "src/lib.rs": true, "dir/nested.txt": true}
-	if len(names) != len(want) {
-		t.Fatalf("entries = %v, want %v", names, want)
-	}
-	for _, n := range names {
-		if !want[n] {
-			t.Fatalf("unexpected entry %q", n)
-		}
-	}
-}
-
-func TestRepackStripTopSkipsTopEntry(t *testing.T) {
-	// Archive whose only entry is the top dir itself: empty output, no error.
-	var in bytes.Buffer
-	gz := gzip.NewWriter(&in)
-	tw := tar.NewWriter(gz)
-	_ = tw.WriteHeader(&tar.Header{Name: "repo-main/", Typeflag: tar.TypeDir})
-	_ = tw.Close()
-	_ = gz.Close()
-	var out bytes.Buffer
-	if err := repackStripTop(bytes.NewReader(in.Bytes()), &out); err != nil {
-		t.Fatal(err)
-	}
-	if names := readArchive(out.Bytes()); len(names) != 0 {
-		t.Fatalf("expected empty archive, got %v", names)
-	}
-}
-
 // --- jj bookmark resolution ---------------------------------------------
 
 func newFakeJJ(t *testing.T, bookmarks string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/repos/verify/exists/bookmarks", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/repos/verify/exists/branches", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(bookmarks))
 	})
-	mux.HandleFunc("/api/v1/repos/verify/nope/bookmarks", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"bookmarks":[]}`))
+	mux.HandleFunc("/api/v1/repos/verify/nope/branches", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"branches":[]}`))
 	})
 	mux.HandleFunc("/api/v1/repos/verify/ws/", func(w http.ResponseWriter, r *http.Request) {
-		// /api/v1/repos/verify/ws/{rev}/archive
-		rev := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/verify/ws/")
-		rev = strings.TrimSuffix(rev, "/archive")
+		// jjlab tarball is flat: /api/v1/repos/verify/ws/archive/tarball/{rev}
+		rev := strings.TrimPrefix(r.URL.Path, "/api/v1/repos/verify/ws/archive/tarball/")
 		w.Header().Set("Content-Type", "application/gzip")
-		_, _ = w.Write(buildArchive("ws-"+rev, map[string]string{
+		_, _ = w.Write(buildFlatArchive(map[string]string{
 			"file.txt": "content-" + rev,
 		}))
 	})
@@ -110,7 +70,7 @@ func newFakeJJ(t *testing.T, bookmarks string) *httptest.Server {
 }
 
 func TestJJBookmarkHead(t *testing.T) {
-	jj := newFakeJJ(t, `{"bookmarks":[{"branch":"main","full_name":"refs/heads/main","target":"abc123"}]}`)
+	jj := newFakeJJ(t, `{"branches":[{"name":"main","sha":"abc123"}]}`)
 	defer jj.Close()
 	s := &server{jj: jj.URL, wsCache: map[string]wsCacheEntry{}}
 
@@ -124,7 +84,7 @@ func TestJJBookmarkHead(t *testing.T) {
 }
 
 func TestResolveWorkspaceSessionName(t *testing.T) {
-	jj := newFakeJJ(t, `{"bookmarks":[{"branch":"main","full_name":"refs/heads/main","target":"abc123"}]}`)
+	jj := newFakeJJ(t, `{"branches":[{"name":"main","sha":"abc123"}]}`)
 	defer jj.Close()
 	s := &server{jj: jj.URL, wsCache: map[string]wsCacheEntry{}}
 
@@ -138,10 +98,8 @@ func TestResolveWorkspaceSessionName(t *testing.T) {
 	}
 }
 
-// --- sync state machine --------------------------------------------------
-
 func TestSyncStateMachine(t *testing.T) {
-	jj := newFakeJJ(t, `{"bookmarks":[{"branch":"main","full_name":"refs/heads/main","target":"rev1"}]}`)
+	jj := newFakeJJ(t, `{"branches":[{"name":"main","sha":"rev1"}]}`)
 	defer jj.Close()
 
 	var syncs int32

@@ -27,6 +27,7 @@ func (s *server) httpGetJSON(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	s.addAuth(req)
 	client := defaultClient
 	resp, err := client.Do(req)
 	if err != nil {
@@ -54,6 +55,7 @@ func (s *server) httpPostJSON(ctx context.Context, url string, body interface{})
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	s.addAuth(req)
 	client := defaultClient
 	resp, err := client.Do(req)
 	if err != nil {
@@ -81,6 +83,7 @@ func (s *server) httpPutJSON(ctx context.Context, url string, body interface{}) 
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	s.addAuth(req)
 	client := defaultClient
 	resp, err := client.Do(req)
 	if err != nil {
@@ -103,6 +106,7 @@ func (s *server) httpGetRaw(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.addAuth(req)
 	client := defaultClient
 	resp, err := client.Do(req)
 	if err != nil {
@@ -117,6 +121,22 @@ func (s *server) httpGetRaw(ctx context.Context, url string) ([]byte, error) {
 		return body, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return body, nil
+}
+
+// addAuth attaches the appropriate token to a request: jjlab routes get the
+// jjlab write token (`Authorization: token <…>`); artifact-registry routes
+// get the artifact token (`Authorization: Bearer <…>`). Anonymous registry
+// reads are fine without a token.
+func (s *server) addAuth(req *http.Request) {
+	u := req.URL.String()
+	isJJ := strings.HasPrefix(u, s.jj+"/") || u == s.jj
+	if isJJ && s.jjToken != "" {
+		req.Header.Set("Authorization", "token "+s.jjToken)
+		return
+	}
+	if strings.HasPrefix(u, s.artifact+"/") && s.artifactToken != "" {
+		req.Header.Set("Authorization", "Bearer "+s.artifactToken)
+	}
 }
 
 // redactURL strips query strings from URLs before embedding them in errors.

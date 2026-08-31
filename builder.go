@@ -75,17 +75,18 @@ func (b buildBody) BookmarkOrDefault() string {
 }
 
 // fetchRepoArchive downloads the tar.gz of org/repo@rev from jjlab into a
-// fresh temp dir and returns its path (caller must RemoveAll it). The archive
-// has a single top-level "{repo}-{rev}" directory which is stripped, so build
-// contexts have the repo files at the root.
+// fresh temp dir and returns its path (caller must RemoveAll it). jjlab's
+// tarball has no single top-level directory (entries are rooted at "/"), so no
+// strip is applied.
 func (s *server) fetchRepoArchive(ctx context.Context, org, repo, rev string) (string, error) {
-	archiveURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/%s/archive",
+	archiveURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/archive/tarball/%s",
 		s.jj, urlPathEscape(org), urlPathEscape(repo), urlPathEscape(rev))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
 	if err != nil {
 		return "", err
 	}
+	s.addAuth(req)
 	resp, err := longClient.Do(req)
 	if err != nil {
 		return "", err
@@ -99,7 +100,7 @@ func (s *server) fetchRepoArchive(ctx context.Context, org, repo, rev string) (s
 	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 		return "", err
 	}
-	if err := extractTarGz(resp.Body, tmpDir, 1); err != nil {
+	if err := extractTarGz(resp.Body, tmpDir, 0); err != nil {
 		os.RemoveAll(tmpDir)
 		return "", fmt.Errorf("untar: %w", err)
 	}

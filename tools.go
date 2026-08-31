@@ -503,12 +503,8 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if org == "" {
 					org = "external"
 				}
-				body := map[string]interface{}{
-					"org":     org,
-					"repo":    repo,
-					"git_url": gitURL,
-				}
-				v, err := s.httpPostJSON(ctx, s.jj+"/api/v1/repos/clone", body)
+				v, err := s.httpPostJSON(ctx, s.jj+"/api/v1/repos/"+urlPathEscape(org)+"/"+urlPathEscape(repo)+"/sync/clone",
+					map[string]interface{}{"url": gitURL})
 				return extension.ToolResultData{Content: v}, err
 			},
 		},
@@ -698,12 +694,13 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 		return "", fmt.Errorf("port sandbox read failed: %w", err)
 	}
 
-	// 2. Write to jjlab via Contents API (base64).
-	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/%s/contents/%s",
-		s.jj, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo), urlPathEscape(sc.ws.bookmark), escapePath(repoPath))
+	// 2. Write to jjlab via the contents API (Gitea-style: ?ref= + base64 content).
+	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents/%s?ref=%s",
+		s.jj, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo), escapePath(repoPath), urlPathEscape(sc.ws.bookmark))
 	body := map[string]interface{}{
-		"content": base64Encode(string(data)),
-		"message": message,
+		"content_base64": base64Encode(string(data)),
+		"branch":         sc.ws.bookmark,
+		"message":        message,
 	}
 	if _, err := s.httpPutJSON(ctx, url, body); err != nil {
 		return "", fmt.Errorf("port write failed: %w", err)
