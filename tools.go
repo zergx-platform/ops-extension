@@ -410,7 +410,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if name == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-status: missing 'release_name'")
 				}
-				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)+"/status")
+				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name))
 				return extension.ToolResultData{Content: v}, err
 			},
 		},
@@ -420,8 +420,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if name == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall: missing 'release_name'")
 				}
-				_, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)+"/uninstall", map[string]interface{}{})
-				if err != nil {
+				if err := s.httpDelete(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)); err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall failed: %w", err)
 				}
 				return extension.ToolResultData{Content: fmt.Sprintf("Uninstalled helm release %q", name)}, nil

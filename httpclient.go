@@ -100,6 +100,27 @@ func (s *server) httpPutJSON(ctx context.Context, url string, body interface{}) 
 	return toJSON(v), nil
 }
 
+// httpDelete issues a DELETE request and ignores the (typically empty) body.
+func (s *server) httpDelete(ctx context.Context, url string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	s.addAuth(req)
+	client := defaultClient
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		var v interface{}
+		_ = json.NewDecoder(resp.Body).Decode(&v)
+		return fmt.Errorf("DELETE %s: %d %s", redactURL(url), resp.StatusCode, toJSON(v))
+	}
+	return nil
+}
+
 // httpGetRaw fetches a URL and returns the raw body bytes.
 func (s *server) httpGetRaw(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
