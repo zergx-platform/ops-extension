@@ -39,8 +39,7 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		check("jjlab", s.jj+"/api/v1/health"),
 	}
 	_, cfgErr := s.jjops.Config(ctx)
-	bkOK := cfgErr == nil
-	deps = append(deps, map[string]interface{}{"name": "jjlab-ops", "ok": bkOK})
+	deps = append(deps, map[string]interface{}{"name": "jjlab-ops", "ok": cfgErr == nil, "error": errStr(cfgErr)})
 
 	svcs, _ := s.jjops.ListServices(ctx, s.runtimeNamespace)
 	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
@@ -49,6 +48,14 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		"deps":      deps,
 		"sandboxes": len(svcs),
 	})
+}
+
+// errStr renders an error or "".
+func errStr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // sandboxesList returns worker pods with their session labels and the repo rev
