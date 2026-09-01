@@ -172,3 +172,28 @@ func redactURL(u string) string {
 func selfBase() string {
 	return "http://127.0.0.1:" + env.Or("ZERGX_PORT", "8080")
 }
+
+// httpPostJSONErr POSTs a JSON body and returns a plain error on failure
+// (no body decoding expected).
+func (s *server) httpPostJSONErr(ctx context.Context, url string, body interface{}) error {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	s.addAuth(req)
+	resp, err := defaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("POST %s: %d %s", redactURL(url), resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	return nil
+}

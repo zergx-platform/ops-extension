@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"strings"
 	"time"
+
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jjlab"
 )
 
 // sandboxCtx is the resolved per-call sandbox context: which workspace, which
@@ -134,52 +135,110 @@ func (s *server) jjBookmarkHead(ctx context.Context, org, repo, bm string) (stri
 }
 
 // ensureSandbox resolves the workspace, ensures the session's worker pod
-// exists (get-or-create), and — when needSync — that the pod's workspace
-// matches the bookmark head.
+// exists (get-or-create via jjlab), and — when needSync — that the pod's
+// workspace matches the bookmark head (sync executed server-side by jjlab).
 func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{}, sessionName string, needSync bool) (sandboxCtx, error) {
 	ws, sid, err := s.resolveWorkspace(ctx, args, sessionName)
 	if err != nil {
 		return sandboxCtx{}, err
 	}
-	info, err := s.k8s.EnsureContainer(ctx, sid, "")
+	info, err := s.ensureWorker(ctx, sid)
 	if err != nil {
 		return sandboxCtx{}, fmt.Errorf("ensure container for %s: %w", sid, err)
 	}
 	s.publishSandboxVars(ctx, sid, info)
 	sc := sandboxCtx{session: sid, cid: info.ContainerID, ws: ws}
 	if needSync {
-		if err := s.ensureSynced(ctx, sc.cid, ws); err != nil {
+		if err := s.ensureSynced(ctx, sc.cid, sc.session, ws); err != nil {
 			return sandboxCtx{}, err
 		}
 	}
 	return sc, nil
 }
 
-// ensureSynced pushes the repo tree at ws.rev into the worker unless the
-// worker already holds that rev. Only the worker's sync/files endpoint is
-// used (a pure overlay extract): files that exist only in the sandbox are
-// never deleted, repo files are overwritten with the new rev's content.
-func (s *server) ensureSynced(ctx context.Context, cid string, ws workspace) error {
+// sandboxWorkerPort is the port worker-go serves inside the sandbox pod.
+const sandboxWorkerPort = 48080
+
+// ensureWorker get-or-creates the session's worker pod through jjlab (a bare
+// `zergx-worker` service with a zergx/session annotation preserving the raw
+// session name) and returns its container info.
+func (s *server) ensureWorker(ctx context.Context, sid string) (ContainerInfo, error) {
+	key := labelKey(sid)
+	st, err := s.jjops.EnsureService(ctx, jjlab.ServiceRequest{
+		Name:  key,
+		Image: s.workerImage,
+		Kind:  "bare",
+		Ports: []jjlab.PortSpec{{Container: sandboxWorkerPort, Service: 80}},
+		Annotations: map[string]string{
+			"zergx/session": sid,
+		},
+		Namespace: s.runtimeNamespace,
+	})
+	if err != nil {
+		return ContainerInfo{}, err
+	}
+	return ContainerInfo{
+		ContainerID: key,
+		PodName:     "sandbox-" + key[:8],
+		Namespace:   s.runtimeNamespace,
+		WorkerURL:   st.WorkerURL(sandboxWorkerPort),
+		PodIP:       st.PodIP,
+		Status:      statusFromReady(st),
+		SessionName: sid,
+	}, nil
+}
+
+// statusFromReady maps jjlab's readiness into the legacy status vocabulary.
+func statusFromReady(st jjlab.ServiceStatus) string {
+	if st.Ready {
+		return "running"
+	}
+	if st.Phase != "" {
+		return strings.ToLower(st.Phase)
+	}
+	return "pending"
+}
+
+// workerInfo fetches the current sandbox state from jjlab.
+func (s *server) workerInfo(ctx context.Context, key string) (ContainerInfo, error) {
+	st, err := s.jjops.Service(ctx, key, s.runtimeNamespace)
+	if err != nil {
+		return ContainerInfo{}, err
+	}
+	return ContainerInfo{
+		ContainerID: key,
+		PodName:     "sandbox-" + key[:8],
+		Namespace:   s.runtimeNamespace,
+		WorkerURL:   st.WorkerURL(sandboxWorkerPort),
+		PodIP:       st.PodIP,
+		Status:      statusFromReady(st),
+	}, nil
+}
+
+// destroyWorker deletes the sandbox through jjlab. The ID may be the raw
+// session name, the derived key, or a pod/short name.
+func (s *server) destroyWorker(ctx context.Context, id string) error {
+	return s.jjops.DeleteService(ctx, labelKey(id), s.runtimeNamespace)
+}
+
+// ensureSynced pushes the repo tree at ws.rev into the worker unless jjlab
+// already holds that rev. The tarball fetch + overlay extract happen inside
+// jjlab (which owns both the repo store and the pod); ops-extension just
+// names the target.
+func (s *server) ensureSynced(ctx context.Context, cid, session string, ws workspace) error {
 	if s.syncedRev(cid) == ws.rev {
 		return nil
 	}
-	wu, err := s.workerBaseURL(ctx, cid)
-	if err != nil {
+	if _, err := s.jjops.Sync(ctx, labelKey(session), jjlab.SyncRequest{
+		Org:       ws.org,
+		Repo:      ws.repo,
+		Rev:       ws.rev,
+		Namespace: s.runtimeNamespace,
+	}, false); err != nil {
 		return fmt.Errorf("sync: %w", err)
-	}
-	if err := s.syncToURL(ctx, wu, ws); err != nil {
-		return err
 	}
 	s.setSyncedRev(cid, ws.rev)
 	return nil
-}
-
-// workerBaseURL resolves a container's worker HTTP base (injectable for tests).
-func (s *server) workerBaseURL(ctx context.Context, cid string) (string, error) {
-	if s.workerResolver != nil {
-		return s.workerResolver(cid)
-	}
-	return s.resolveWorkerURL(ctx, cid)
 }
 
 // markUnsynced forgets the tracked rev (worker restart / need_sync) so the
@@ -202,58 +261,42 @@ func (s *server) setSyncedRev(cid, rev string) {
 	s.syncMu.Unlock()
 }
 
-// syncToURL streams the jj archive for ws.rev into the worker's sync/files
-// endpoint, stripping the archive's top-level "{repo}-{rev}/" directory so the
-// workspace root holds the repo files directly. Fully streaming (no temp
-// files): jj response → repack pipe → worker request body.
-func (s *server) syncToURL(ctx context.Context, workerBase string, ws workspace) error {
-	archiveURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/archive/tarball/%s",
-		s.jj, urlPathEscape(ws.org), urlPathEscape(ws.repo), urlPathEscape(ws.rev))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
-	if err != nil {
-		return err
-	}
-	s.addAuth(req)
-	resp, err := longClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch archive: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("fetch archive: %d", resp.StatusCode)
-	}
+// ── local naming helpers (moved from internal/k8s; sessions are addressed by
+// deterministic keys, no stored state) ──
 
-	// jjlab's tarball is already flat (files at repo-root paths, no top-level
-	// directory), so stream it straight into the worker's sync/files endpoint.
-	syncURL := strings.TrimSuffix(workerBase, "/") + "/api/v1/sync/files?rev=" + url.QueryEscape(ws.rev)
-	sreq, err := http.NewRequestWithContext(ctx, http.MethodPost, syncURL, resp.Body)
-	if err != nil {
-		return err
+// labelKey sanitizes an arbitrary label (session names contain ':' which is
+// illegal in k8s label values and pod names) into a deterministic k8s-safe
+// key. Values that are already valid are used as-is (e.g. UUIDs).
+func labelKey(label string) string {
+	if validLabelValue(label) {
+		return label
 	}
-	sreq.Header.Set("Content-Type", "application/gzip")
-	sresp, err := longClient.Do(sreq)
-	if err != nil {
-		return fmt.Errorf("worker sync: %w", err)
-	}
-	defer sresp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(sresp.Body, 1<<20))
-	if sresp.StatusCode != http.StatusOK {
-		return fmt.Errorf("worker sync: HTTP %d: %s", sresp.StatusCode, string(body))
-	}
-	var out struct {
-		OK    bool   `json:"ok"`
-		Files int    `json:"files"`
-		Err   string `json:"error"`
-	}
-	if err := json.Unmarshal(body, &out); err != nil || !out.OK {
-		return fmt.Errorf("worker sync: %s", orDefaultStr(string(out.Err), "no ok"))
-	}
-	return nil
+	sum := sha256.Sum256([]byte(label))
+	return hex.EncodeToString(sum[:])[:16]
 }
 
-func orDefaultStr(v, def string) string {
-	if strings.TrimSpace(v) == "" {
-		return def
+// validLabelValue follows the k8s label value grammar: alphanumerics, '-',
+// '_' and '.', at most 63 chars.
+func validLabelValue(v string) bool {
+	if len(v) == 0 || len(v) > 63 {
+		return false
 	}
-	return v
+	for _, r := range v {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// ContainerInfo is the ops-extension view of a sandbox worker (now sourced
+// from jjlab instead of client-go pod listings).
+type ContainerInfo struct {
+	ContainerID string
+	PodName     string
+	Namespace   string
+	WorkerURL   string
+	PodIP       string
+	Status      string
+	SessionName string
 }

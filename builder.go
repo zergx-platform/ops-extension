@@ -1,23 +1,17 @@
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"strings"
+	"time"
 
 	"forgejo.develop.10.199.64.20.nip.io/zergx/go-shared/jsonwrite"
-	"os"
-	"path"
-	"path/filepath"
-	"strings"
-
-	"github.com/google/uuid"
 )
+
+var _ = fmt.Sprintf
 
 // Built-in containerfile templates (phase 2, mirror original misc.rs).
 func builtinTemplates() []map[string]string {
@@ -74,39 +68,6 @@ func (b buildBody) BookmarkOrDefault() string {
 	return b.Bookmark
 }
 
-// fetchRepoArchive downloads the tar.gz of org/repo@rev from jjlab into a
-// fresh temp dir and returns its path (caller must RemoveAll it). jjlab's
-// tarball has no single top-level directory (entries are rooted at "/"), so no
-// strip is applied.
-func (s *server) fetchRepoArchive(ctx context.Context, org, repo, rev string) (string, error) {
-	archiveURL := fmt.Sprintf("%s/api/v1/repos/%s/%s/archive/tarball/%s",
-		s.jj, urlPathEscape(org), urlPathEscape(repo), urlPathEscape(rev))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
-	if err != nil {
-		return "", err
-	}
-	s.addAuth(req)
-	resp, err := longClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("fetch context: %d", resp.StatusCode)
-	}
-
-	tmpDir := filepath.Join(os.TempDir(), "ops-build-"+uuid.NewString())
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-		return "", err
-	}
-	if err := extractTarGz(resp.Body, tmpDir, 0); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", fmt.Errorf("untar: %w", err)
-	}
-	return tmpDir, nil
-}
-
 func (s *server) buildImage(w http.ResponseWriter, r *http.Request) {
 	var b buildBody
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
@@ -128,84 +89,69 @@ func (s *server) buildImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := s.startBuildTask(b.Tag, b)
+	// Forward to jjlab (it owns buildkitd, the repo store and the export).
+	fullImage := s.artifactImageHost + "/" + b.Tag + ":" + b.ImageRefTag()
+	req := map[string]interface{}{
+		"org":      b.Org,
+		"repo":     b.Repo,
+		"bookmark": b.Bookmark,
+		"raw":      b.Raw,
+		"image":    fullImage,
+		"export":   "push",
+		"no_cache": b.ForceNoCache(),
+	}
+	if b.Raw {
+		req["containerfile"] = b.Dockerfile
+	} else if b.Dockerfile != "" {
+		req["dockerfile"] = b.Dockerfile
+	}
+	id, err := s.opsSubmitBuild(r.Context(), req)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	// Mirror the jjlab task into the local registry so /builds/{id} (status +
+	// SSE log) keeps working unchanged; the poller folds jjlab state in.
+	s.mirrorOpsTask(id, "build", b.Tag, fullImage)
 	jsonwrite.JSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
 }
 
-// extractTarGz expands a tar.gz stream into dest, optionally stripping the
-// first `strip` path components from every entry (like tar --strip-components).
-func extractTarGz(r interface{ Read([]byte) (int, error) }, dest string, strip int) error {
-	gz, err := gzip.NewReader(r)
-	if err != nil {
-		return err
+// mirrorOpsTask registers a local task that tracks a jjlab ops task until it
+// leaves "running", copying status/result/error into the local view.
+func (s *server) mirrorOpsTask(id, kind, tag, image string) {
+	t := &buildTask{
+		ID:        id,
+		Kind:      kind,
+		Tag:       tag,
+		State:     "running",
+		Image:     image,
+		StartedAt: time.Now(),
+		subs:      map[chan buildLogLine]struct{}{},
 	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-		name := hdr.Name
-		// Normalize: tar paths may carry "./" prefixes and trailing slashes.
-		name = path.Clean(strings.TrimPrefix(name, "./"))
-		if name == "." || name == "/" {
-			continue // fully consumed by normalization
-		}
-		// Zip-slip defense: the cleaned entry path must stay a relative path
-		// that does not climb out of the destination.
-		if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
-			return fmt.Errorf("tar entry %q escapes destination directory", hdr.Name)
-		}
-		parts := strings.Split(name, "/")
-		if strip > 0 {
-			if len(parts) <= strip {
-				continue // the stripped top-level entry itself
-			}
-			parts = parts[strip:]
-		}
-		target := filepath.Join(append([]string{dest}, parts...)...)
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY, 0o644)
-			if err != nil {
-				return err
-			}
-			if _, err := ioCopy(f, tr); err != nil {
-				f.Close()
-				return err
-			}
-			f.Close()
-		}
-	}
-}
+	s.builds.Store(id, t)
+	s.evictBuilds()
 
-func ioCopy(dst interface{ Write([]byte) (int, error) }, src interface{ Read([]byte) (int, error) }) (int64, error) {
-	buf := make([]byte, 32*1024)
-	var written int64
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			if _, werr := dst.Write(buf[:n]); werr != nil {
-				return written, werr
-			}
-			written += int64(n)
-		}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		res, err := s.opsTask(ctx, id)
 		if err != nil {
-			if err.Error() == "EOF" {
-				return written, nil
-			}
-			return written, err
+			t.append(buildLogLine{Stream: kind, Line: "ERROR: " + err.Error()})
+			t.setResult(image, err.Error())
+			return
 		}
-	}
+		if res["status"] == "done" {
+			if r, _ := res["result"].(string); r != "" {
+				t.append(buildLogLine{Stream: kind, Line: r})
+			}
+			t.setResult(image, "")
+			return
+		}
+		msg, _ := res["error"].(string)
+		if msg == "" {
+			msg = "jjlab task " + res["status"].(string)
+		}
+		t.append(buildLogLine{Stream: kind, Line: "ERROR: " + msg})
+		t.setResult(image, msg)
+	}()
 }

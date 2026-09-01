@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jjlab"
 )
 
 // --- flat tarball fixture (jjlab archive has no top-level dir) --------
@@ -99,45 +101,50 @@ func TestResolveWorkspaceSessionName(t *testing.T) {
 }
 
 func TestSyncStateMachine(t *testing.T) {
-	jj := newFakeJJ(t, `{"branches":[{"name":"main","sha":"rev1"}]}`)
-	defer jj.Close()
-
 	var syncs int32
-	var lastRev string
 	var lastBody []byte
-	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/sync/files" {
+	var lastPath string
+	fakeJJ := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/sync") {
 			http.NotFound(w, r)
 			return
 		}
 		atomic.AddInt32(&syncs, 1)
-		lastRev = r.URL.Query().Get("rev")
+		lastPath = r.URL.Path
 		lastBody, _ = io.ReadAll(r.Body)
-		_, _ = w.Write([]byte(`{"ok":true,"files":1}`))
+		_, _ = w.Write([]byte(`{"ok":true,"skipped":false,"files":1}`))
 	}))
-	defer worker.Close()
+	defer fakeJJ.Close()
 
-	s := &server{jj: jj.URL, wsCache: map[string]wsCacheEntry{}, synced: map[string]string{},
-		workerResolver: func(string) (string, error) { return worker.URL, nil }}
+	s := &server{jjops: jjlab.New(fakeJJ.URL, "devtoken"), runtimeNamespace: "temp",
+		wsCache: map[string]wsCacheEntry{}, synced: map[string]string{}}
 	ws := workspace{org: "verify", repo: "ws", bookmark: "main", rev: "rev1"}
 
 	// First ensure → syncs.
-	if err := s.ensureSynced(context.Background(), "cid1", ws); err != nil {
+	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
 		t.Fatal(err)
 	}
 	if n := atomic.LoadInt32(&syncs); n != 1 {
 		t.Fatalf("syncs=%d want 1", n)
 	}
-	if lastRev != "rev1" {
-		t.Fatalf("rev=%q want rev1", lastRev)
+	// The sync request must name the org/repo/rev.
+	var reqBody struct {
+		Org  string `json:"org"`
+		Repo string `json:"repo"`
+		Rev  string `json:"rev"`
 	}
-	// Tarball must be stripped of the top-level dir.
-	if names := readArchive(lastBody); len(names) != 1 || names[0] != "file.txt" {
-		t.Fatalf("synced archive entries = %v", names)
+	_ = json.Unmarshal(lastBody, &reqBody)
+	if reqBody.Org != "verify" || reqBody.Repo != "ws" || reqBody.Rev != "rev1" {
+		t.Fatalf("sync body = %+v", reqBody)
+	}
+	// The path must address the session's sandbox (labelKey of the session).
+	wantPath := "/api/v1/ops/services/" + labelKey("verify:ws:main") + "/sync"
+	if lastPath != wantPath {
+		t.Fatalf("sync path = %q want %q", lastPath, wantPath)
 	}
 
 	// Second ensure with same rev → cached, no extra sync.
-	if err := s.ensureSynced(context.Background(), "cid1", ws); err != nil {
+	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
 		t.Fatal(err)
 	}
 	if n := atomic.LoadInt32(&syncs); n != 1 {
@@ -146,7 +153,7 @@ func TestSyncStateMachine(t *testing.T) {
 
 	// New rev → syncs again.
 	ws.rev = "rev2"
-	if err := s.ensureSynced(context.Background(), "cid1", ws); err != nil {
+	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
 		t.Fatal(err)
 	}
 	if n := atomic.LoadInt32(&syncs); n != 2 {
@@ -155,28 +162,32 @@ func TestSyncStateMachine(t *testing.T) {
 
 	// Worker restart (need_sync): markUnsynced forces a re-push.
 	s.markUnsynced("cid1")
-	if err := s.ensureSynced(context.Background(), "cid1", ws); err != nil {
+	if err := s.ensureSynced(context.Background(), "cid1", "verify:ws:main", ws); err != nil {
 		t.Fatal(err)
 	}
 	if n := atomic.LoadInt32(&syncs); n != 3 {
 		t.Fatalf("syncs=%d want 3", n)
 	}
 
-	// Worker failure surfaces as an error.
-	if err := s.syncToURL(context.Background(), "http://127.0.0.1:1", ws); err == nil {
-		t.Fatal("unreachable worker must error")
+	// jjlab failure surfaces as an error (unreachable server).
+	closed := jjlab.New("http://127.0.0.1:1", "")
+	if _, err := closed.Sync(context.Background(), "x", jjlab.SyncRequest{
+		Org: "o", Repo: "r", Rev: "v"}, false); err == nil {
+		t.Fatal("unreachable jjlab must error")
 	}
 }
 
 func TestSyncWorkerRejectsBadResponse(t *testing.T) {
-	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "boom"})
+	fakeJJ := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"ok":false,"error":"worker sync 500: boom"}`))
 	}))
-	defer worker.Close()
-	s := &server{synced: map[string]string{}}
+	defer fakeJJ.Close()
+	s := &server{jjops: jjlab.New(fakeJJ.URL, "devtoken"), runtimeNamespace: "temp",
+		synced: map[string]string{}}
 	ws := workspace{org: "o", repo: "r", bookmark: "main", rev: "v"}
-	if err := s.syncToURL(context.Background(), worker.URL, ws); err == nil {
-		t.Fatal("worker ok:false must error")
+	if err := s.ensureSynced(context.Background(), "cid", "o:r:main", ws); err == nil {
+		t.Fatal("jjlab error must propagate")
 	}
 	if s.syncedRev("cid") != "" {
 		t.Fatal("rev must not be recorded on failure")

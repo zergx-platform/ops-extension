@@ -6,9 +6,9 @@ import (
 	"net/http"
 
 	"forgejo.develop.10.199.64.20.nip.io/zergx/go-shared/jsonwrite"
-	"strings"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/k8s"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jjlab"
+	"strings"
 )
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
@@ -18,8 +18,8 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 func (s *server) k8sConfig(w http.ResponseWriter, r *http.Request) {
 	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
 		"ok":           true,
-		"namespace":    s.k8s.Namespace(),
-		"worker_image": s.k8s.WorkerImage(),
+		"namespace":    s.runtimeNamespace,
+		"worker_image": s.workerImage,
 	})
 }
 
@@ -31,7 +31,7 @@ func sessionParam(r *http.Request) string {
 
 func (s *server) deleteContainer(w http.ResponseWriter, r *http.Request) {
 	session := param(r, "session")
-	if err := s.k8s.DestroyContainer(r.Context(), session); err != nil {
+	if err := s.destroyWorker(r.Context(), session); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -181,13 +181,13 @@ func (s *server) sandboxWrite(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Name      string               `json:"name"`
-		Image     string               `json:"image"`
-		Replicas  int32                `json:"replicas"`
-		Port      int32                `json:"port"`
-		Env       map[string]string    `json:"env"`
-		Session   string               `json:"session"`
-		Resources *k8s.ResourceRequest `json:"resources"`
+		Name      string            `json:"name"`
+		Image     string            `json:"image"`
+		Replicas  int32             `json:"replicas"`
+		Port      int32             `json:"port"`
+		Env       map[string]string `json:"env"`
+		Session   string            `json:"session"`
+		Resources *ResourceRequest  `json:"resources"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
 	if b.Name == "" || b.Image == "" {
@@ -197,12 +197,7 @@ func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 	if b.Port == 0 {
 		b.Port = 8080
 	}
-	reqs, err := b.Resources.Requirements()
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := s.k8s.EnsureDeployment(r.Context(), b.Name, b.Image, b.Replicas, b.Port, b.Env, b.Session, reqs); err != nil {
+	if _, err := s.jjops.EnsureService(r.Context(), s.deploymentRequest(b)); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -214,3 +209,57 @@ func shellQuote(s string) string {
 }
 
 var _ = context.Background
+
+// ResourcePair is one side of a nested resource declaration.
+type ResourcePair struct {
+	CPU    string `json:"cpu,omitempty"`
+	Memory string `json:"memory,omitempty"`
+}
+
+// ResourceRequest is the nested `resources:{requests:{...},limits:{...}}`
+// shape accepted by the deploy API and the container-deploy tool. jjlab
+// applies CPU/memory to the workload's requests+limits.
+type ResourceRequest struct {
+	Requests *ResourcePair `json:"requests,omitempty"`
+	Limits   *ResourcePair `json:"limits,omitempty"`
+}
+
+// deploymentRequest converts the legacy deploy body into a jjlab service
+// request (a user-app deployment with an http port).
+func (s *server) deploymentRequest(b struct {
+	Name      string            `json:"name"`
+	Image     string            `json:"image"`
+	Replicas  int32             `json:"replicas"`
+	Port      int32             `json:"port"`
+	Env       map[string]string `json:"env"`
+	Session   string            `json:"session"`
+	Resources *ResourceRequest  `json:"resources"`
+}) jjlab.ServiceRequest {
+	req := jjlab.ServiceRequest{
+		Name:      b.Name,
+		Image:     b.Image,
+		Kind:      "deployment",
+		Ports:     []jjlab.PortSpec{{Container: int(b.Port), Service: 80}},
+		Env:       b.Env,
+		Namespace: s.runtimeNamespace,
+	}
+	if b.Replicas > 0 {
+		replicas := int(b.Replicas)
+		req.Replicas = &replicas
+	}
+	if b.Session != "" {
+		req.Annotations = map[string]string{"zergx/session": b.Session}
+	}
+	if b.Resources != nil && (b.Resources.Requests != nil || b.Resources.Limits != nil) {
+		res := jjlab.ResourceSpec{}
+		if b.Resources.Requests != nil {
+			res.CPU = b.Resources.Requests.CPU
+			res.Memory = b.Resources.Requests.Memory
+		} else if b.Resources.Limits != nil {
+			res.CPU = b.Resources.Limits.CPU
+			res.Memory = b.Resources.Limits.Memory
+		}
+		req.Resources = &res
+	}
+	return req
+}

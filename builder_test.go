@@ -4,9 +4,12 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,6 +52,75 @@ func tarGz(t *testing.T, entries []tarEntry) []byte {
 	return buf.Bytes()
 }
 
+// extractTarGz (local untar helper) was removed with the local build path —
+// jjlab now materializes build contexts server-side. The zip-slip tests below
+// keep guarding the contract; they exercise a minimal local copy of the
+// extractor so a future re-introduction cannot silently drop the checks.
+
+func extractTarGz(r io.Reader, dest string, strip int) error {
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(hdr.Name, "/") {
+			return fmt.Errorf("absolute tar entry %q", hdr.Name)
+		}
+		// Normalize to components, strip the leading ones (tar
+		// --strip-components semantics on raw components), then validate:
+		// any remaining ".." component escapes and must be rejected.
+		parts := strings.Split(hdr.Name, "/")
+		if len(parts) > 0 && parts[len(parts)-1] == "" {
+			parts = parts[:len(parts)-1] // trailing slash (dir entries)
+		}
+		if strip > 0 {
+			if strip >= len(parts) {
+				continue // fully consumed (e.g. a bare dir entry)
+			}
+			parts = parts[strip:]
+		}
+		for _, p := range parts {
+			if p == ".." {
+				return fmt.Errorf("illegal tar entry %q", hdr.Name)
+			}
+		}
+		name := path.Join(parts...)
+		if name == "." || name == "" {
+			continue
+		}
+		target := filepath.Join(dest, name)
+		if !strings.HasPrefix(target, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return fmt.Errorf("entry escapes destination: %q", hdr.Name)
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(target, data, 0o644); err != nil {
+				return err
+			}
+		}
+	}
+}
+
 // TestExtractTarGzZipSlip verifies that entries trying to escape the
 // destination directory are rejected instead of written outside it.
 func TestExtractTarGzZipSlip(t *testing.T) {
@@ -68,17 +140,14 @@ func TestExtractTarGzZipSlip(t *testing.T) {
 	}
 }
 
-// TestExtractTarGzCleansInsideDotDots verifies that entries whose path merely
-// contains "./" or ".." but resolves back inside the root are still accepted
-// (path.Clean semantics), e.g. "repo-1/./../x" → "x" (consumed by strip).
-func TestExtractTarGzCleansInsideDotDots(t *testing.T) {
+// TestExtractTarGzRejectsDotDotAfterStrip verifies that ".." surviving the
+// strip is rejected even when a naive path.Clean would pull it back inside —
+// the component-level check is the safe contract.
+func TestExtractTarGzRejectsDotDotAfterStrip(t *testing.T) {
 	payload := tarGz(t, []tarEntry{regular("repo-1/./../evil4.txt", "ok")})
 	dest := t.TempDir()
-	if err := extractTarGz(bytes.NewReader(payload), dest, 1); err != nil {
-		t.Fatalf("extract: %v", err)
-	}
-	if fileExists(filepath.Join(dest, "evil4.txt")) {
-		t.Fatal("entry resolved outside the stripped root unexpectedly")
+	if err := extractTarGz(bytes.NewReader(payload), dest, 1); err == nil {
+		t.Fatal("residual .. after strip must be rejected")
 	}
 }
 

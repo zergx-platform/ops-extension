@@ -38,22 +38,23 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		check("artifact", s.artifact+"/v2/"),
 		check("jjlab", s.jj+"/api/v1/health"),
 	}
-	bkOK := s.buildkit.Ping(ctx)
-	deps = append(deps, map[string]interface{}{"name": "buildkitd", "ok": bkOK})
+	_, cfgErr := s.jjops.Config(ctx)
+	bkOK := cfgErr == nil
+	deps = append(deps, map[string]interface{}{"name": "jjlab-ops", "ok": bkOK})
 
-	containers, _ := s.k8s.ListContainers(ctx)
+	svcs, _ := s.jjops.ListServices(ctx, s.runtimeNamespace)
 	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
 		"ok":        true,
 		"version":   version,
 		"deps":      deps,
-		"sandboxes": len(containers),
+		"sandboxes": len(svcs),
 	})
 }
 
 // sandboxesList returns worker pods with their session labels and the repo rev
 // each is synced to.
 func (s *server) sandboxesList(w http.ResponseWriter, r *http.Request) {
-	list, err := s.k8s.ListContainers(r.Context())
+	list, err := s.jjops.ListServices(r.Context(), s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -66,15 +67,16 @@ func (s *server) sandboxesList(w http.ResponseWriter, r *http.Request) {
 	s.syncMu.Unlock()
 
 	out := []map[string]interface{}{}
-	for _, c := range list {
+	for _, svc := range list {
+		name, _ := svc["name"].(string)
+		session, _ := svc["session"].(string)
 		out = append(out, map[string]interface{}{
-			"container_id": c.ContainerID,
-			"session":      c.SessionName,
-			"pod_name":     c.PodName,
-			"status":       c.Status,
-			"worker_url":   c.WorkerURL,
-			"pod_ip":       c.PodIP,
-			"synced_rev":   synced[c.ContainerID],
+			"container_id": name,
+			"session":      session,
+			"pod_name":     name,
+			"status":       svc["phase"],
+			"pod_ip":       svc["pod_ip"],
+			"synced_rev":   synced[name],
 		})
 	}
 	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"sandboxes": out})
@@ -84,7 +86,7 @@ func (s *server) sandboxesList(w http.ResponseWriter, r *http.Request) {
 func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
 	session := chi.URLParam(r, "session")
 	key := sessionKey(session)
-	info, err := s.k8s.FindContainer(r.Context(), key)
+	info, err := s.workerInfo(r.Context(), key)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
@@ -104,24 +106,20 @@ func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
 		"synced_rev":   syncedRev,
 	}
 
-	deps, err := s.k8s.FindDeploymentsBySession(r.Context(), session)
+	svcs, err := s.jjops.ListServices(r.Context(), s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	outDeps := []map[string]interface{}{}
-	for _, d := range deps {
-		outDeps = append(outDeps, map[string]interface{}{
-			"name":      d.Name,
-			"image":     d.Image,
-			"replicas":  d.Replicas,
-			"ready":     d.Ready,
-			"namespace": d.Namespace,
-			"age":       d.Age,
-			"ports":     d.Ports,
-			"session":   d.Session,
-			"resources": d.Resources,
-		})
+	for _, svc := range svcs {
+		if svc["kind"] != "deployment" {
+			continue
+		}
+		if svcSession, _ := svc["session"].(string); svcSession != "" && svcSession != session {
+			continue
+		}
+		outDeps = append(outDeps, svc)
 	}
 
 	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
@@ -132,24 +130,16 @@ func (s *server) sandboxGet(w http.ResponseWriter, r *http.Request) {
 
 // deploymentsList returns the deployments (services) this ops-extension owns.
 func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
-	list, err := s.k8s.ListDeployments(r.Context())
+	list, err := s.jjops.ListServices(r.Context(), s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	out := []map[string]interface{}{}
-	for _, d := range list {
-		out = append(out, map[string]interface{}{
-			"name":      d.Name,
-			"image":     d.Image,
-			"replicas":  d.Replicas,
-			"ready":     d.Ready,
-			"namespace": d.Namespace,
-			"age":       d.Age,
-			"ports":     d.Ports,
-			"session":   d.Session,
-			"resources": d.Resources,
-		})
+	for _, svc := range list {
+		if svc["kind"] == "deployment" {
+			out = append(out, svc)
+		}
 	}
 	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"deployments": out})
 }
@@ -157,48 +147,36 @@ func (s *server) deploymentsList(w http.ResponseWriter, r *http.Request) {
 // deploymentPods returns the pods of one deployment.
 func (s *server) deploymentPods(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	pods, err := s.k8s.DeploymentPods(r.Context(), name)
+	pods, err := s.jjops.ServicePods(r.Context(), name, s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := []map[string]interface{}{}
-	for _, p := range pods {
-		out = append(out, map[string]interface{}{
-			"name":     p.Name,
-			"ip":       p.IP,
-			"phase":    p.Phase,
-			"ready":    p.Ready,
-			"image":    p.Image,
-			"age":      p.Age,
-			"restarts": p.Restarts,
-		})
-	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"pods": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"pods": pods})
 }
 
 // deploymentStatus reports the rollout state of one deployment.
 func (s *server) deploymentStatus(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	st, err := s.k8s.DeploymentStatus(r.Context(), name)
+	st, err := s.jjops.Service(r.Context(), name, s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
-		"observed_generation":  st.ObservedGeneration,
-		"updated_replicas":     st.UpdatedReplicas,
-		"ready_replicas":       st.ReadyReplicas,
-		"available_replicas":   st.AvailableReplicas,
-		"unavailable_replicas": st.UnavailableReplicas,
-		"conditions":           st.Conditions,
+		"name":     st.Name,
+		"kind":     st.Kind,
+		"replicas": st.Replicas,
+		"ready":    st.Ready,
+		"phase":    st.Phase,
+		"pod_ip":   st.PodIP,
 	})
 }
 
 // deploymentDelete removes a deployment + service.
 func (s *server) deploymentDelete(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := s.k8s.DeleteDeployment(r.Context(), name); err != nil {
+	if err := s.jjops.DeleteService(r.Context(), name, s.runtimeNamespace); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -209,7 +187,7 @@ func (s *server) deploymentDelete(w http.ResponseWriter, r *http.Request) {
 // annotation on the pod template).
 func (s *server) deploymentRestart(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := s.k8s.RestartDeployment(r.Context(), name); err != nil {
+	if err := s.jjops.RestartService(r.Context(), name, s.runtimeNamespace); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -223,7 +201,7 @@ func (s *server) deploymentScale(w http.ResponseWriter, r *http.Request) {
 		Replicas int32 `json:"replicas"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
-	if err := s.k8s.ScaleDeployment(r.Context(), name, b.Replicas); err != nil {
+	if err := s.jjops.ScaleService(r.Context(), name, int(b.Replicas), s.runtimeNamespace); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -237,7 +215,7 @@ func (s *server) deploymentRollback(w http.ResponseWriter, r *http.Request) {
 		Revision int64 `json:"revision"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
-	if err := s.k8s.RollbackDeployment(r.Context(), name, b.Revision); err != nil {
+	if err := s.jjops.RollbackService(r.Context(), name, b.Revision, s.runtimeNamespace); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -247,42 +225,23 @@ func (s *server) deploymentRollback(w http.ResponseWriter, r *http.Request) {
 // deploymentEvents lists k8s events for a deployment (rollout debugging).
 func (s *server) deploymentEvents(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	events, err := s.k8s.DeploymentEvents(r.Context(), name)
+	events, err := s.jjops.ServiceEvents(r.Context(), name, s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := []map[string]interface{}{}
-	for _, e := range events {
-		out = append(out, map[string]interface{}{
-			"reason":  e.Reason,
-			"message": e.Message,
-			"type":    e.Type,
-			"age":     e.Age,
-		})
-	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"events": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"events": events})
 }
 
 // deploymentRevisions lists the ReplicaSet revisions of a deployment.
 func (s *server) deploymentRevisions(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	revs, err := s.k8s.DeploymentRevisions(r.Context(), name)
+	revs, err := s.jjops.ServiceRevisions(r.Context(), name, s.runtimeNamespace)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := []map[string]interface{}{}
-	for _, r := range revs {
-		out = append(out, map[string]interface{}{
-			"revision": r.Revision,
-			"image":    r.Image,
-			"replicas": r.Replicas,
-			"ready":    r.Ready,
-			"age":      r.Age,
-		})
-	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"revisions": out})
+	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"revisions": revs})
 }
 
 // packagesList proxies the artifact registry's package list (avoids CORS and

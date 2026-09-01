@@ -10,8 +10,6 @@ import (
 	"net/http"
 
 	"forgejo.develop.10.199.64.20.nip.io/zergx/go-shared/jsonwrite"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -132,26 +130,6 @@ func (t *buildTask) summary() map[string]interface{} {
 	}
 }
 
-// startBuildTask registers a new build task and launches the build in a
-// background goroutine with a context independent of any HTTP request, so the
-// client disconnecting does not cancel the build.
-func (s *server) startBuildTask(tag string, b buildBody) string {
-	id := uuid.NewString()
-	t := &buildTask{
-		ID:        id,
-		Kind:      "build",
-		Tag:       tag,
-		State:     "running",
-		StartedAt: time.Now(),
-		subs:      map[chan buildLogLine]struct{}{},
-	}
-	s.builds.Store(id, t)
-	s.evictBuilds()
-
-	go s.runBuildTask(t, b)
-	return id
-}
-
 func (s *server) evictBuilds() {
 	// Bound the number of retained tasks: evict oldest finished tasks beyond
 	// buildMaxTasks, and any finished task older than buildTaskTTL.
@@ -199,53 +177,6 @@ func (s *server) evictBuilds() {
 	for i := 0; i < excess && i < len(finished); i++ {
 		s.builds.Delete(finished[i].id)
 	}
-}
-
-func (s *server) runBuildTask(t *buildTask, b buildBody) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-	onStatus := func(line string) {
-		for _, ln := range splitLines(line) {
-			if ln != "" {
-				t.append(buildLogLine{Stream: "build", Line: ln})
-			}
-		}
-	}
-
-	build := func() (string, error) {
-		if b.Raw {
-			tmpDir, err := os.MkdirTemp("", "ops-raw-")
-			if err != nil {
-				return "", err
-			}
-			defer os.RemoveAll(tmpDir)
-			if err := os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(b.Dockerfile), 0o644); err != nil {
-				return "", err
-			}
-			fullTag := fmt.Sprintf("%s/%s:%s", s.artifactImageHost, b.Tag, b.ImageRefTag())
-			return s.buildkit.Build(ctx, tmpDir, "Dockerfile", fullTag, onStatus, b.ForceNoCache())
-		}
-		tmpDir, err := s.fetchRepoArchive(ctx, b.Org, b.Repo, b.Bookmark)
-		if err != nil {
-			return "", err
-		}
-		defer os.RemoveAll(tmpDir)
-		fullTag := fmt.Sprintf("%s/%s:%s", s.artifactImageHost, b.Tag, b.ImageRefTag())
-		df := b.Dockerfile
-		if df == "" {
-			df = "Dockerfile"
-		}
-		return s.buildkit.Build(ctx, tmpDir, df, fullTag, onStatus, b.ForceNoCache())
-	}
-
-	image, err := build()
-	if err != nil {
-		t.append(buildLogLine{Stream: "build", Line: "ERROR: " + err.Error()})
-		t.setResult("", err.Error())
-		return
-	}
-	t.append(buildLogLine{Stream: "build", Line: "built " + image})
-	t.setResult(image, "")
 }
 
 // buildsList returns all retained build tasks.

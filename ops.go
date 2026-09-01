@@ -16,6 +16,9 @@ import (
 
 // opsSubmitBuild enqueues an image build on jjlab and returns the task id.
 func (s *server) opsSubmitBuild(ctx context.Context, req map[string]interface{}) (string, error) {
+	if req["namespace"] == nil {
+		req["namespace"] = s.runtimeNamespace
+	}
 	body, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/builds", req)
 	if err != nil {
 		return "", err
@@ -31,6 +34,9 @@ func (s *server) opsSubmitBuild(ctx context.Context, req map[string]interface{})
 
 // opsSubmitHelm enqueues a helm install/upgrade on jjlab and returns the task id.
 func (s *server) opsSubmitHelm(ctx context.Context, req map[string]interface{}) (string, error) {
+	if req["namespace"] == nil {
+		req["namespace"] = s.runtimeNamespace
+	}
 	body, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/helm/install", req)
 	if err != nil {
 		return "", err

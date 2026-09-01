@@ -17,9 +17,9 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -315,29 +315,18 @@ func (s *server) publishPackage(ctx context.Context, protocol, org, repo, bookma
 		specArgs[a] = buildArgs[a]
 	}
 
-	// 1. Repo checkout from jjlab as build context.
-	tmpDir, err := s.fetchRepoArchive(ctx, org, repo, bookmark)
-	if err != nil {
-		return "", fmt.Errorf("publish context: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// 2. Containerfile: custom (from the repo) or the protocol template.
-	containerfile := ".publish.containerfile"
+	// 1. Render the containerfile (protocol template or one from the repo).
+	// For a custom dockerfile_path we fetch the file via jjlab contents API.
+	containerfile := renderPublishContainerfile(spec)
 	if dockerfilePath != "" {
-		src := filepath.Join(tmpDir, filepath.Clean("/"+dockerfilePath))
-		data, err := os.ReadFile(src)
+		data, err := s.fetchRepoFile(ctx, org, repo, bookmark, dockerfilePath)
 		if err != nil {
 			return "", fmt.Errorf("read dockerfile %s: %w", dockerfilePath, err)
 		}
-		if err := os.WriteFile(filepath.Join(tmpDir, containerfile), data, 0o644); err != nil {
-			return "", err
-		}
-	} else if err := os.WriteFile(filepath.Join(tmpDir, containerfile), []byte(renderPublishContainerfile(spec)), 0o644); err != nil {
-		return "", err
+		containerfile = string(data)
 	}
 
-	// 3. Run (no export) with the standard args + per-protocol args.
+	// 2. Standard + per-protocol build args (jjlab passes them to buildkit).
 	specArgs[argArtifactURL] = s.artifact
 	specArgs[argArtifactTok] = s.artifactToken
 	specArgs[argPublishTS] = strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -351,8 +340,37 @@ func (s *server) publishPackage(ctx context.Context, protocol, org, repo, bookma
 		}
 		specArgs["NPMRC_LINE"] = fmt.Sprintf("//%s/pkgs/npm/:_authToken=%s", hostOf(s.artifact), token)
 	}
-	if err := s.buildkit.Run(ctx, tmpDir, containerfile, specArgs, nil); err != nil {
-		return "", fmt.Errorf("%s publish failed: %w", protocol, err)
+	argList := make([]string, 0, len(specArgs))
+	for k, v := range specArgs {
+		if v != "" {
+			argList = append(argList, k+"="+v)
+		}
+	}
+	sort.Strings(argList)
+
+	// 3. Run through jjlab's build (export=none) and await it.
+	id, err := s.opsSubmitBuild(ctx, map[string]interface{}{
+		"org":           org,
+		"repo":          repo,
+		"bookmark":      bookmark,
+		"raw":           true,
+		"containerfile": containerfile,
+		"export":        "none",
+		"build_args":    argList,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%s publish submit: %w", protocol, err)
+	}
+	res, err := s.opsTask(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("%s publish task: %w", protocol, err)
+	}
+	if res["status"] != "done" {
+		msg, _ := res["error"].(string)
+		if msg == "" {
+			msg = "task " + res["status"].(string)
+		}
+		return "", fmt.Errorf("%s publish failed: %s", protocol, msg)
 	}
 
 	// 4. The RUN exiting 0 is the success signal (CLI failures fail the step).
@@ -370,4 +388,25 @@ func supportedProtocols() string {
 	}
 	sort.Strings(ps)
 	return strings.Join(ps, ", ")
+}
+
+// fetchRepoFile reads one file from a repo snapshot via jjlab's contents API.
+func (s *server) fetchRepoFile(ctx context.Context, org, repo, rev, path string) ([]byte, error) {
+	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents/%s?ref=%s",
+		s.jj, urlPathEscape(org), urlPathEscape(repo), escapePath(path), urlPathEscape(rev))
+	body, err := s.httpGetRaw(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("contents %s: bad response: %w", path, err)
+	}
+	if out.Encoding == "base64" {
+		return base64.StdEncoding.DecodeString(out.Content)
+	}
+	return []byte(out.Content), nil
 }

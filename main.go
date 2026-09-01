@@ -21,8 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/buildkit"
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/k8s"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jjlab"
 	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/worker"
 )
 
@@ -30,9 +29,10 @@ import (
 var manifestYaml []byte
 
 type server struct {
-	k8s               *k8s.Manager
+	jjops             *jjlab.Client // jjlab /ops client (owns all k8s access)
+	workerImage       string        // sandbox worker image (jjlab runs it)
+	runtimeNamespace  string        // namespace where jjlab creates sandboxes/deployments
 	ext               *extension.Extension
-	buildkit          *buildkit.Client
 	artifact          string // artifact registry base URL (packages + OCI + metadata)
 	artifactImageHost string // TLS ingress host for image refs (FROM/push via buildkit)
 	artifactToken     string // optional bearer/basic token for artifact write auth
@@ -56,7 +56,6 @@ func main() {
 	img := env.Or("ZERGX_WORKER_IMAGE", "artifact.zergx.svc.cluster.local/zergx-worker:v0.0.1")
 	natsURL := env.Or("NATS_URL", "nats://nats.zergx.svc.cluster.local:4222")
 	port := env.Or("ZERGX_PORT", "8080")
-	buildkitAddr := env.Or("ZERGX_BUILDKIT_ADDR", "tcp://buildkitd.zergx.svc.cluster.local:1234")
 	// jjlab replaces the old repo-manager (archive + contents + clone).
 	// The cluster service is named repo (jjlab is the binary).
 	jj := env.Or("ZERGX_JJ_SERVER_URL", env.Or("ZERGX_REPO_MANAGER_URL", "http://jjlab.zergx.svc.cluster.local:80"))
@@ -72,27 +71,17 @@ func main() {
 	artifactToken := env.Or("ZERGX_ARTIFACT_TOKEN", "")
 	jjToken := env.Or("JJLAB_TOKEN", env.Or("ZERGX_JJLAB_TOKEN", "devtoken"))
 
-	km, err := k8s.NewManager(k8s.Config{
-		Namespace:     ns,
-		WorkerImage:   img,
-		CPURequest:    env.Or("ZERGX_WORKER_CPU_REQUEST", ""),
-		CPULimit:      env.Or("ZERGX_WORKER_CPU_LIMIT", ""),
-		MemoryRequest: env.Or("ZERGX_WORKER_MEM_REQUEST", ""),
-		MemoryLimit:   env.Or("ZERGX_WORKER_MEM_LIMIT", ""),
-	})
-	if err != nil {
-		slog.Error("k8s manager init failed", "svc", "ops-extension", "err", err)
-		os.Exit(1)
-	}
+	runtimeNS := env.Or("ZERGX_RUNTIME_NAMESPACE", ns)
 
 	s := &server{
-		k8s:               km,
-		buildkit:          buildkit.New(buildkitAddr),
+		jjops:             jjlab.New(jj, jjToken),
 		artifact:          artifact,
 		artifactImageHost: artifactImageHost,
 		artifactToken:     artifactToken,
 		jj:                jj,
 		jjToken:           jjToken,
+		workerImage:       img,
+		runtimeNamespace:  runtimeNS,
 		wsCache:           map[string]wsCacheEntry{},
 		synced:            map[string]string{},
 	}
@@ -138,7 +127,7 @@ func main() {
 				Port:    port,
 				Run: func(runCtx context.Context, ext *extension.Extension) {
 					s.ext = ext
-					slog.Info("listening", "svc", "ops-extension", "addr", ":"+port, "buildkit", buildkitAddr, "artifact", artifact, "jj", jj)
+					slog.Info("listening", "svc", "ops-extension", "addr", ":"+port, "artifact", artifact, "jj", jj, "runtime-ns", runtimeNS)
 				},
 			},
 		); err != nil {
@@ -150,7 +139,7 @@ func main() {
 
 	r := s.router(true)
 	addr := ":" + port
-	slog.Info("listening", "svc", "ops-extension", "addr", addr, "buildkit", buildkitAddr, "artifact", artifact, "jj", jj)
+	slog.Info("listening", "svc", "ops-extension", "addr", addr, "artifact", artifact, "jj", jj, "runtime-ns", runtimeNS)
 	if err := http.ListenAndServe(addr, r); err != nil {
 		slog.Error("http server failed", "svc", "ops-extension", "err", err)
 		os.Exit(1)
@@ -247,21 +236,16 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	jsonwrite.JSON(w, code, map[string]interface{}{"ok": false, "error": msg})
 }
 
-// resolveWorkerURL finds the worker URL for a container ID.
+// resolveWorkerURL finds the worker URL for a container ID (jjlab-sourced).
 func (s *server) resolveWorkerURL(ctx context.Context, cid string) (string, error) {
-	list, err := s.k8s.ListContainers(ctx)
+	info, err := s.workerInfo(ctx, cid)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("no worker for container %s", cid)
 	}
-	for _, c := range list {
-		if c.ContainerID == cid || c.PodName == cid {
-			if c.WorkerURL == "" {
-				return "", fmt.Errorf("worker not ready")
-			}
-			return c.WorkerURL, nil
-		}
+	if info.WorkerURL == "" {
+		return "", fmt.Errorf("worker not ready")
 	}
-	return "", fmt.Errorf("no worker for container %s", cid)
+	return info.WorkerURL, nil
 }
 
 func (s *server) workerCommand(ctx context.Context, cid, method string, params map[string]interface{}) (interface{}, error) {

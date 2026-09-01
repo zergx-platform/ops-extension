@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"regexp"
 	"strings"
 )
@@ -51,11 +49,8 @@ func parseSessionName(name string) (org, repo, bookmark string, ok bool) {
 	return parts[0], parts[1], parts[2], true
 }
 
-// sessionKey derives a k8s-safe identifier for a session label: session names
-// contain `:` which is illegal in label values and pod names, so the raw name
-// is hashed. The derivation is deterministic, so a session can always be
-// re-found by its key without any stored state.
+// sessionKey derives the k8s-safe sandbox key for a session name (the
+// canonical derivation lives in labelKey, sessions.go).
 func sessionKey(session string) string {
-	sum := sha256.Sum256([]byte(session))
-	return hex.EncodeToString(sum[:])[:16]
+	return labelKey(session)
 }

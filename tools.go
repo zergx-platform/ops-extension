@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -11,7 +12,6 @@ import (
 	abcprotocol "forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go"
 	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/extension"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/k8s"
 	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/worker"
 )
 
@@ -49,7 +49,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					// gate (content is verified synced on our side).
 					if strings.Contains(err.Error(), "need_sync") {
 						s.markUnsynced(sc.cid)
-						if err := s.ensureSynced(ctx, sc.cid, sc.ws); err != nil {
+						if err := s.ensureSynced(ctx, sc.cid, sc.session, sc.ws); err != nil {
 							return extension.ToolResultData{}, err
 						}
 						if res, err = run(sc.ws.rev); err != nil {
@@ -341,6 +341,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					}
 					body["resources"] = res
 				}
+				body["namespace"] = s.runtimeNamespace
 				_, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/services", body)
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("container-deploy failed: %w", err)
@@ -400,7 +401,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"helm-list": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/helm/releases")
+				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/helm/releases?namespace="+url.QueryEscape(s.runtimeNamespace))
 				return extension.ToolResultData{Content: v}, err
 			},
 		},
@@ -410,7 +411,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if name == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-status: missing 'release_name'")
 				}
-				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name))
+				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)+"?namespace="+url.QueryEscape(s.runtimeNamespace))
 				return extension.ToolResultData{Content: v}, err
 			},
 		},
@@ -420,7 +421,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if name == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall: missing 'release_name'")
 				}
-				if err := s.httpDelete(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)); err != nil {
+				if err := s.httpDelete(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)+"?namespace="+url.QueryEscape(s.runtimeNamespace)); err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall failed: %w", err)
 				}
 				return extension.ToolResultData{Content: fmt.Sprintf("Uninstalled helm release %q", name)}, nil
@@ -701,20 +702,20 @@ func (s *server) imageList(ctx context.Context) (string, error) {
 
 // resourceRequestFromArgs extracts the nested resources arg (if any) from a
 // tool argument map, tolerant of missing/malformed entries.
-func resourceRequestFromArgs(args map[string]interface{}) k8s.ResourceRequest {
-	var rr k8s.ResourceRequest
+func resourceRequestFromArgs(args map[string]interface{}) *ResourceRequest {
+	rr := &ResourceRequest{}
 	raw, ok := args["resources"].(map[string]interface{})
 	if !ok {
 		return rr
 	}
 	if reqs, ok := raw["requests"].(map[string]interface{}); ok {
-		rr.Requests = &k8s.ResourcePair{
+		rr.Requests = &ResourcePair{
 			CPU:    strArg(reqs, "cpu"),
 			Memory: strArg(reqs, "memory"),
 		}
 	}
 	if limits, ok := raw["limits"].(map[string]interface{}); ok {
-		rr.Limits = &k8s.ResourcePair{
+		rr.Limits = &ResourcePair{
 			CPU:    strArg(limits, "cpu"),
 			Memory: strArg(limits, "memory"),
 		}

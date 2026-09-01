@@ -23,7 +23,7 @@ func (s *server) wsProxy(w http.ResponseWriter, r *http.Request) {
 // WebSocket, so this is an ordinary streaming reverse proxy.
 func (s *server) wsProxyJob(w http.ResponseWriter, r *http.Request) {
 	session := param(r, "session")
-	info, err := s.k8s.FindContainer(r.Context(), sessionKey(session))
+	info, err := s.workerInfo(r.Context(), sessionKey(session))
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
@@ -53,7 +53,7 @@ func (s *server) wsProxyJob(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) proxyWS(w http.ResponseWriter, r *http.Request, suffix string) {
 	session := param(r, "session")
-	info, err := s.k8s.FindContainer(r.Context(), sessionKey(session))
+	info, err := s.workerInfo(r.Context(), sessionKey(session))
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
