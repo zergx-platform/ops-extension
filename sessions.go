@@ -157,6 +157,8 @@ func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{},
 }
 
 // sandboxWorkerPort is the port worker-go serves inside the sandbox pod.
+// The worker's default is 8080, so the ensure request pins ZERGX_PORT to keep
+// the process, the declared containerPort and the readiness probe in sync.
 const sandboxWorkerPort = 48080
 
 // ensureWorker get-or-creates the session's worker pod through jjlab (a bare
@@ -169,6 +171,9 @@ func (s *server) ensureWorker(ctx context.Context, sid string) (ContainerInfo, e
 		Image: s.workerImage,
 		Kind:  "bare",
 		Ports: []jjlab.PortSpec{{Container: sandboxWorkerPort, Service: 80}},
+		Env: map[string]string{
+			"WORKER_PORT": "48080",
+		},
 		Annotations: map[string]string{
 			"zergx/session": sid,
 		},
