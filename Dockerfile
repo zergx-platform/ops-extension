@@ -3,7 +3,7 @@
 # own directory as the build context (no shared parent context). The Go SDK
 # dependency is resolved from go.mod (forgejo module), not copied from a
 # sibling directory.
-ARG REGISTRY=artifact.temp.svc.cluster.local
+ARG REGISTRY=forgejo.develop.10.199.64.20.nip.io/root/
 ARG NODE_IMAGE=26-alpine
 ARG GO_IMAGE=golang:1.26-alpine
 
