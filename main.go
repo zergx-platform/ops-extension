@@ -89,7 +89,7 @@ func main() {
 	// Verification instances must set ZERGX_DISABLE_NATS=1. Tool-call and
 	// variable subscriptions use queue groups keyed by the extension id, so a
 	// second replica with the same id would STEAL live tool calls away from
-	// the serving instance (and double-answer abep.discover, which has no
+	// the serving instance (and double-answer abc.discover, which has no
 	// queue group by design). To keep the tools testable without joining the
 	// bus, such instances expose them over HTTP at POST /api/v1/tools/{name}
 	// with a JSON args body.

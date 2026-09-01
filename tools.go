@@ -474,7 +474,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if org == "" {
 					org = "external"
 				}
-				v, err := s.httpPostJSON(ctx, s.jj+"/api/v1/repos/"+urlPathEscape(org)+"/"+urlPathEscape(repo)+"/sync/clone",
+				v, err := s.httpPostJSON(ctx, s.jj+"/api/v1/repos/"+urlPathEscape(org)+"/"+urlPathEscape(repo)+"/clone",
 					map[string]interface{}{"url": gitURL})
 				return extension.ToolResultData{Content: v}, err
 			},
