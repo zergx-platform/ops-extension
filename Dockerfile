@@ -3,11 +3,11 @@
 # own directory as the build context (no shared parent context). The Go SDK
 # dependency is resolved from go.mod (forgejo module), not copied from a
 # sibling directory.
-ARG REGISTRY=forgejo.develop.10.199.64.20.nip.io/root/
+ARG REGISTRY=forgejo.develop.10.199.64.20.nip.io/root
 ARG NODE_IMAGE=26-alpine
 ARG GO_IMAGE=golang:1.26-alpine
 
-FROM ${REGISTRY}/library/node:${NODE_IMAGE} AS frontend
+FROM ${REGISTRY}/node:${NODE_IMAGE} AS frontend
 ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ENV HTTP_PROXY=${HTTP_PROXY} \
@@ -19,7 +19,7 @@ RUN npm install -g pnpm && (pnpm install --frozen-lockfile || pnpm install)
 COPY frontend/ ./
 RUN pnpm build
 
-FROM ${REGISTRY}/library/${GO_IMAGE} AS build
+FROM ${REGISTRY}/${GO_IMAGE} AS build
 ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ENV HTTP_PROXY=${HTTP_PROXY} \
