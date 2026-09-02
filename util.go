@@ -140,24 +140,16 @@ func (s *server) sandboxFileWrite(ctx context.Context, cid, path string, data []
 	return nil
 }
 
-// sandboxFileStat stats a sandbox path via the worker file_read RPC (a bare
-// stat is unavailable, so a successful read implies existence). Returns a
-// synthesized FileInfo-like map with an `is_dir` flag derived from a trailing
-// slash or the file_list reply shape.
+// sandboxFileStat stats a sandbox path via the worker file_list RPC (which
+// returns `is_dir` for the path). For a single trailing-slash-less file the
+// list has one entry but is_dir is false, so the flag (not the count) drives
+// the directory branch.
 func (s *server) sandboxFileStat(ctx context.Context, cid, path string) (os.FileInfo, error) {
-	// Prefer a proper stat via the worker's file_list on the exact path.
 	res, err := s.workerCommand(ctx, cid, "file_list", map[string]interface{}{"path": path})
 	if err != nil {
 		return nil, fmt.Errorf("file_list %s: %w", path, err)
 	}
-	files, _ := rawMap(res)["files"].([]interface{})
-	isDir := len(files) > 0 || strings.HasSuffix(path, "/")
-	if len(files) == 0 && !strings.HasSuffix(path, "/") {
-		// Single file: fall back to a read to confirm existence.
-		if _, rerr := s.sandboxFileRead(ctx, cid, path); rerr != nil {
-			return nil, rerr
-		}
-	}
+	isDir, _ := rawMap(res)["is_dir"].(bool)
 	return syntheticFileInfo{isDir: isDir}, nil
 }
 
