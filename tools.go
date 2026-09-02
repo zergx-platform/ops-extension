@@ -158,6 +158,27 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				return extension.ToolResultData{Content: string(data)}, nil
 			},
 		},
+		"sandbox-download": {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+				code := strArg(args, "code")
+				path := strArg(args, "path")
+				if code == "" || path == "" {
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-download: 'code' and 'path' are required")
+				}
+				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
+				if err != nil {
+					return extension.ToolResultData{}, err
+				}
+				data, err := s.fetchAgentFile(ctx, code)
+				if err != nil {
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-download: download %s: %w", code, err)
+				}
+				if err := s.sandboxFileWrite(ctx, sc.cid, path, data); err != nil {
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-download failed: %w", err)
+				}
+				return extension.ToolResultData{Content: fmt.Sprintf("Downloaded file %s → sandbox path '%s' (%d bytes).", code, path, len(data))}, nil
+			},
+		},
 		"sandbox-write": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				path := strArg(args, "path")

@@ -198,3 +198,11 @@ tools:
         git_url: { type: string }
         org: { type: string }
       required: [git_url]
+  - name: sandbox-download
+    description: Download a previously uploaded file (referenced as file:<code>) into the session sandbox at the given path. The bytes come from the agent's file store; use this to bring attachments into the workspace so shell/docs tooling can reach them.
+    input_schema:
+      type: object
+      properties:
+        code: { type: string, description: "The file code (the segment after file:)" }
+        path: { type: string, description: "Target path in the sandbox (relative to the workspace root)" }
+      required: [code, path]
