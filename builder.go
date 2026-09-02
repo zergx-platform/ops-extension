@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/zergx-platform/ops-extension/internal/jsonwrite"
 )
 
 var _ = fmt.Sprintf
@@ -23,7 +21,7 @@ func builtinTemplates() []map[string]string {
 }
 
 func (s *server) containerfileTemplates(w http.ResponseWriter, r *http.Request) {
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"templates": builtinTemplates()})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"templates": builtinTemplates()})
 }
 
 type buildBody struct {
@@ -113,7 +111,7 @@ func (s *server) buildImage(w http.ResponseWriter, r *http.Request) {
 	// Mirror the jjlab task into the local registry so /builds/{id} (status +
 	// SSE log) keeps working unchanged; the poller folds jjlab state in.
 	s.mirrorOpsTask(id, "build", b.Tag, fullImage)
-	jsonwrite.JSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
 }
 
 // mirrorOpsTask registers a local task that tracks a jjlab ops task until it

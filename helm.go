@@ -7,8 +7,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/zergx-platform/ops-extension/internal/jsonwrite"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -92,7 +90,7 @@ func (s *server) helmInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := s.startHelmInstall(b)
-	jsonwrite.JSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{"ok": true, "build_id": id})
 }
 
 // helmList returns all releases in the namespace (jjlab-sourced).
@@ -134,7 +132,7 @@ func (s *server) helmUninstall(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }
 
 // helmRollback reverts a release to a previous revision (0 = previous).
@@ -148,5 +146,5 @@ func (s *server) helmRollback(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }

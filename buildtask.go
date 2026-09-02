@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/zergx-platform/ops-extension/internal/jsonwrite"
 	"sort"
 	"strings"
 	"sync"
@@ -191,7 +190,7 @@ func (s *server) buildsList(w http.ResponseWriter, r *http.Request) {
 		sj, _ := out[j]["started_at"].(time.Time)
 		return si.After(sj)
 	})
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"builds": out})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"builds": out})
 }
 
 // buildGet returns one task's status plus its full log.
@@ -202,7 +201,7 @@ func (s *server) buildGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := v.(*buildTask)
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"build": t.summary(),
 		"logs":  t.snapshotLogs(),
 	})

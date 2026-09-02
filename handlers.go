@@ -5,18 +5,16 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/zergx-platform/ops-extension/internal/jsonwrite"
-
 	"github.com/zergx-platform/ops-extension/internal/jjlab"
 	"strings"
 )
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true, "name": "ops-extension"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "name": "ops-extension"})
 }
 
 func (s *server) k8sConfig(w http.ResponseWriter, r *http.Request) {
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":           true,
 		"namespace":    s.runtimeNamespace,
 		"worker_image": s.workerImage,
@@ -35,7 +33,7 @@ func (s *server) deleteContainer(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 }
 
 func (s *server) exec(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +50,7 @@ func (s *server) exec(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, res)
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *server) listJobs(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +60,7 @@ func (s *server) listJobs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"jobs": res})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"jobs": res})
 }
 
 func (s *server) jobOutput(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +77,7 @@ func (s *server) jobOutput(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, res)
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *server) jobWait(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +107,7 @@ func (s *server) jobWait(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, res)
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *server) jobStdin(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +127,7 @@ func (s *server) jobStdin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, res)
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *server) kill(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +138,7 @@ func (s *server) kill(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": res})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": res})
 }
 
 func (s *server) sandboxRead(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +156,7 @@ func (s *server) sandboxRead(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true, "content": string(data)})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "content": string(data)})
 }
 
 func (s *server) sandboxWrite(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +174,7 @@ func (s *server) sandboxWrite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true, "path": b.Path})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "path": b.Path})
 }
 
 func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +199,7 @@ func (s *server) deploy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true, "name": b.Name, "image": b.Image})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "name": b.Name, "image": b.Image})
 }
 
 func shellQuote(s string) string {

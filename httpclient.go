@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/zergx-platform/ops-extension/internal/env"
 	"strings"
 	"time"
 )
@@ -170,7 +169,7 @@ func redactURL(u string) string {
 
 // selfBase returns the HTTP base of this instance for self-invoking build.
 func selfBase() string {
-	return "http://127.0.0.1:" + env.Or("ZERGX_PORT", "8080")
+	return "http://127.0.0.1:" + envOr("ZERGX_PORT", "8080")
 }
 
 // httpPostJSONErr POSTs a JSON body and returns a plain error on failure

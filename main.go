@@ -8,9 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/zergx-platform/ops-extension/internal/jsonwrite"
-
-	"github.com/zergx-platform/ops-extension/internal/env"
 	"os"
 	"sync"
 
@@ -52,26 +49,26 @@ type server struct {
 }
 
 func main() {
-	ns := env.Or("ZERGX_K8S_NAMESPACE", "zergx")
-	img := env.Or("ZERGX_WORKER_IMAGE", "artifact.zergx.svc.cluster.local/zergx-worker:v0.0.1")
-	natsURL := env.Or("NATS_URL", "nats://nats.zergx.svc.cluster.local:4222")
-	port := env.Or("ZERGX_PORT", "8080")
+	ns := envOr("ZERGX_K8S_NAMESPACE", "zergx")
+	img := envOr("ZERGX_WORKER_IMAGE", "artifact.zergx.svc.cluster.local/zergx-worker:v0.0.1")
+	natsURL := envOr("NATS_URL", "nats://nats.zergx.svc.cluster.local:4222")
+	port := envOr("ZERGX_PORT", "8080")
 	// jjlab replaces the old repo-manager (archive + contents + clone).
 	// The cluster service is named repo (jjlab is the binary).
-	jj := env.Or("ZERGX_JJ_SERVER_URL", env.Or("ZERGX_REPO_MANAGER_URL", "http://jjlab.zergx.svc.cluster.local:80"))
+	jj := envOr("ZERGX_JJ_SERVER_URL", envOr("ZERGX_REPO_MANAGER_URL", "http://jjlab.zergx.svc.cluster.local:80"))
 	// Artifact registry replaces zot (OCI store) + the legacy registry (metadata):
 	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
 	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
 	// used for API calls and in-container CLI uploads.
-	artifact := trimTrailingSlash(env.Or("ZERGX_ARTIFACT_URL", "http://artifact.zergx.svc.cluster.local"))
+	artifact := trimTrailingSlash(envOr("ZERGX_ARTIFACT_URL", "http://artifact.zergx.svc.cluster.local"))
 	// Image references (buildkit FROM/push) must go through the TLS ingress
 	// host configured as insecure in buildkitd's registry config — the svc
 	// host is plain HTTP which buildkit cannot pull/push to.
-	artifactImageHost := env.Or("ZERGX_ARTIFACT_IMAGE_HOST", "artifact.zergx.svc.cluster.local")
-	artifactToken := env.Or("ZERGX_ARTIFACT_TOKEN", "")
-	jjToken := env.Or("JJLAB_TOKEN", env.Or("ZERGX_JJLAB_TOKEN", "devtoken"))
+	artifactImageHost := envOr("ZERGX_ARTIFACT_IMAGE_HOST", "artifact.zergx.svc.cluster.local")
+	artifactToken := envOr("ZERGX_ARTIFACT_TOKEN", "")
+	jjToken := envOr("JJLAB_TOKEN", envOr("ZERGX_JJLAB_TOKEN", "devtoken"))
 
-	runtimeNS := env.Or("ZERGX_RUNTIME_NAMESPACE", ns)
+	runtimeNS := envOr("ZERGX_RUNTIME_NAMESPACE", ns)
 
 	s := &server{
 		jjops:             jjlab.New(jj, jjToken),
@@ -223,7 +220,7 @@ func (s *server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	jsonwrite.JSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": out})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "result": out})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
@@ -233,7 +230,7 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
-	jsonwrite.JSON(w, code, map[string]interface{}{"ok": false, "error": msg})
+	writeJSON(w, code, map[string]interface{}{"ok": false, "error": msg})
 }
 
 // resolveWorkerURL finds the worker URL for a container ID (jjlab-sourced).
