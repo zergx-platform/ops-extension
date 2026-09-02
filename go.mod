@@ -4,7 +4,6 @@ go 1.26.3
 
 require (
 	forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go v1.0.1
-	forgejo.develop.10.199.64.20.nip.io/zergx/go-shared v0.1.2
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674

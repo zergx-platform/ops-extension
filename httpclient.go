@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/go-shared/env"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/env"
 	"strings"
 	"time"
 )

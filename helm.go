@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"time"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/go-shared/jsonwrite"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jsonwrite"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"

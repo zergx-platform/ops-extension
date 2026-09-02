@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/go-shared/jsonwrite"
+	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jsonwrite"
 	"sort"
 	"strings"
 	"sync"
