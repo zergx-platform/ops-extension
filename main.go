@@ -50,7 +50,7 @@ type server struct {
 
 func main() {
 	ns := envOr("ZERGX_K8S_NAMESPACE", "zergx")
-	img := envOr("ZERGX_WORKER_IMAGE", "artifact.zergx.svc.cluster.local/zergx-worker:v0.0.1")
+	img := envOr("ZERGX_WORKER_IMAGE", "jj-lab.temp.svc.cluster.local/zergx-worker:v0.0.1")
 	natsURL := envOr("NATS_URL", "nats://nats.zergx.svc.cluster.local:4222")
 	port := envOr("ZERGX_PORT", "8080")
 	// jjlab replaces the old repo-manager (archive + contents + clone).
@@ -60,11 +60,11 @@ func main() {
 	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
 	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
 	// used for API calls and in-container CLI uploads.
-	artifact := trimTrailingSlash(envOr("ZERGX_ARTIFACT_URL", "http://artifact.zergx.svc.cluster.local"))
+	artifact := trimTrailingSlash(envOr("ZERGX_ARTIFACT_URL", "http://jj-lab.temp.svc.cluster.local"))
 	// Image references (buildkit FROM/push) must go through the TLS ingress
 	// host configured as insecure in buildkitd's registry config — the svc
 	// host is plain HTTP which buildkit cannot pull/push to.
-	artifactImageHost := envOr("ZERGX_ARTIFACT_IMAGE_HOST", "artifact.zergx.svc.cluster.local")
+	artifactImageHost := envOr("ZERGX_ARTIFACT_IMAGE_HOST", "jj-lab.temp.svc.cluster.local")
 	artifactToken := envOr("ZERGX_ARTIFACT_TOKEN", "")
 	jjToken := envOr("JJLAB_TOKEN", envOr("ZERGX_JJLAB_TOKEN", "devtoken"))
 

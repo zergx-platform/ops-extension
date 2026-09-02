@@ -512,9 +512,9 @@ func strArg(args map[string]interface{}, k string) string {
 // qualifyImage converts a possibly-bare image reference into a
 // fully-qualified in-cluster reference, mirroring how container-build tags
 // images (artifactImageHost/{tag}:{bookmark}). It accepts:
-//   - "example-server"          -> "artifact.zergx.svc.cluster.local/example-server:<defaultTag>"
-//   - "example-server:main"     -> "artifact.zergx.svc.cluster.local/example-server:main"
-//   - "repo/name:tag"           -> "artifact.zergx.svc.cluster.local/repo/name:tag"
+//   - "example-server"          -> "jj-lab.temp.svc.cluster.local/example-server:<defaultTag>"
+//   - "example-server:main"     -> "jj-lab.temp.svc.cluster.local/example-server:main"
+//   - "repo/name:tag"           -> "jj-lab.temp.svc.cluster.local/repo/name:tag"
 //   - "host/repo/name:tag"      -> left unchanged (already qualified)
 //
 // defaultTag is the tag appended when the reference is bare; it should match
