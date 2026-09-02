@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # ops-extension: single binary with embedded Svelte SPA, built from this repo's
 # own directory as the build context (no shared parent context). The Go SDK
-# dependency is resolved from go.mod (forgejo module), not copied from a
+# dependency is resolved from go.mod via jjlab GOPROXY, not copied from a
 # sibling directory.
 ARG REGISTRY=jj-lab.temp.svc.cluster.local
 ARG NODE_IMAGE=26-alpine
@@ -12,7 +12,7 @@ ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ENV HTTP_PROXY=${HTTP_PROXY} \
     HTTPS_PROXY=${HTTPS_PROXY} \
-    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io
+    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc
 WORKDIR /fe
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN npm install -g pnpm && (pnpm install --frozen-lockfile || pnpm install)
@@ -24,17 +24,14 @@ ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
 ENV HTTP_PROXY=${HTTP_PROXY} \
     HTTPS_PROXY=${HTTPS_PROXY} \
-    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,.develop.10.199.64.20.nip.io \
-    GOINSECURE=forgejo.develop.10.199.64.20.nip.io \
-    GOPRIVATE=forgejo.develop.10.199.64.20.nip.io \
+    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc \
+
     GOPROXY=http://jj-lab.temp.svc.cluster.local/pkgs/go|direct \
     GOSUMDB=off \
     GONOSUMDB=abep.dev/sdk,abep.dev/sdk/nats,abep.dev/sdk/ws \
     GOFLAGS=-mod=mod
 RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories \
     && apk add --no-cache git \
-    && git config --global http.sslVerify false \
-    && git config --global url."https://root:devpassword@forgejo.develop.10.199.64.20.nip.io/".insteadOf "https://forgejo.develop.10.199.64.20.nip.io/"
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
