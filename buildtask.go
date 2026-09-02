@@ -295,7 +295,7 @@ func (s *server) awaitBuild(ctx context.Context, id, callID string) (extension.T
 			if t.Error != "" {
 				return extension.ToolResultData{}, fmt.Errorf("%s failed: %s", t.Kind, t.Error)
 			}
-			return extension.ToolResultData{Content: fmt.Sprintf("Finished %s %q", t.Kind, t.Tag)}, nil
+			return extension.ToolResultData{Content: lc(ctx, s.ext, "", fmt.Sprintf("Finished %s %q", t.Kind, t.Tag), fmt.Sprintf("已完成 %s %q", t.Kind, t.Tag))}, nil
 		}
 		select {
 		case <-ctx.Done():

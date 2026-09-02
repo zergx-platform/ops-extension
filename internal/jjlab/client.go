@@ -56,7 +56,9 @@ func (c *Client) do(ctx context.Context, client *http.Client, method, path strin
 	if err != nil {
 		return nil, 0, err
 	}
-	if contentType != "" && body == nil && contentType != "application/json" {
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	} else if contentType != "" && contentType != "application/json" {
 		req.Header.Set("Content-Type", contentType)
 	}
 	c.addAuth(req)

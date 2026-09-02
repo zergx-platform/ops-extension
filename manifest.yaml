@@ -8,12 +8,18 @@ variables:
   - name: sandbox-id
     scope: session
     description: Container ID of the session sandbox.
+    descriptions:
+      zh: "会话沙箱的容器 ID。"
   - name: sandbox-status
     scope: session
     description: Status of the session sandbox.
+    descriptions:
+      zh: "会话沙箱的状态。"
 tools:
   - name: sandbox-run
     description: Run a shell command in the session sandbox. The workspace is synced to the repo bookmark head first (repo files refreshed; sandbox-only files kept).
+    descriptions:
+      zh: "在会话沙箱中运行 shell 命令。先将工作区同步到仓库书签头部（刷新仓库文件；保留仅沙箱的文件）。"
     input_schema:
       type: object
       properties:
@@ -23,6 +29,8 @@ tools:
       required: [command]
   - name: sandbox-read
     description: Read a file from the session sandbox filesystem (synced to repo first).
+    descriptions:
+      zh: "从会话沙箱文件系统读取文件（先同步到仓库）。"
     input_schema:
       type: object
       properties:
@@ -30,6 +38,8 @@ tools:
       required: [path]
   - name: sandbox-write
     description: Write a file into the session sandbox filesystem (no sync first — never clobbers in-progress edits).
+    descriptions:
+      zh: "写入会话沙箱文件系统中的文件（不先同步——绝不覆盖进行中的编辑）。"
     input_schema:
       type: object
       properties:
@@ -38,6 +48,8 @@ tools:
       required: [path, content]
   - name: sandbox-edit
     description: Replace or insert lines in a sandbox file by line numbers (synced to repo first).
+    descriptions:
+      zh: "按行号替换或插入沙箱文件中的行（先同步到仓库）。"
     input_schema:
       type: object
       properties:
@@ -48,11 +60,15 @@ tools:
       required: [path, start_line, end_line]
   - name: sandbox-job-list
     description: List jobs (commands) in the session sandbox.
+    descriptions:
+      zh: "列出会话沙箱中的作业（命令）。"
     input_schema:
       type: object
       properties: {}
   - name: sandbox-job-output
     description: Read output of a sandbox job (supports offset/limit/grep).
+    descriptions:
+      zh: "读取沙箱作业的输出（支持 offset/limit/grep）。"
     input_schema:
       type: object
       properties:
@@ -63,6 +79,8 @@ tools:
       required: [job_id]
   - name: sandbox-job-wait
     description: Wait for a sandbox job to finish.
+    descriptions:
+      zh: "等待沙箱作业完成。"
     input_schema:
       type: object
       properties:
@@ -71,6 +89,8 @@ tools:
       required: [job_id]
   - name: sandbox-job-stdin
     description: Send stdin data to a running sandbox job.
+    descriptions:
+      zh: "向运行中的沙箱作业发送 stdin 数据。"
     input_schema:
       type: object
       properties:
@@ -79,6 +99,8 @@ tools:
       required: [job_id, data]
   - name: sandbox-job-kill
     description: Kill a sandbox job.
+    descriptions:
+      zh: "终止沙箱作业。"
     input_schema:
       type: object
       properties:
@@ -86,6 +108,8 @@ tools:
       required: [job_id]
   - name: sandbox-port
     description: Copy a file from the sandbox into the session's repo (bookmark moves; the change syncs back on the next sandbox tool call).
+    descriptions:
+      zh: "把文件从沙箱复制到会话的仓库（书签移动；该变更会在下一次沙箱工具调用时回写）。"
     input_schema:
       type: object
       properties:
@@ -95,6 +119,8 @@ tools:
       required: [sandbox_path, repo_path]
   - name: container-build
     description: Build a container image from a Containerfile in the repo using the remote buildkit builder.
+    descriptions:
+      zh: "使用远程 buildkit 构建器从仓库中的 Containerfile 构建容器镜像。"
     input_schema:
       type: object
       properties:
@@ -106,6 +132,8 @@ tools:
       required: [dockerfile_path, tag]
   - name: container-deploy
     description: Deploy a container image as a Kubernetes deployment (with optional nested resource requests/limits).
+    descriptions:
+      zh: "将容器镜像部署为 Kubernetes Deployment（可带嵌套的 resource requests/limits）。"
     input_schema:
       type: object
       properties:
@@ -127,17 +155,23 @@ tools:
       required: [image]
   - name: image-list
     description: List container images in the OCI registry.
+    descriptions:
+      zh: "列出 OCI registry 中的容器镜像。"
     input_schema:
       type: object
       properties: {}
   - name: deployment-list
     description: List Kubernetes deployments created via container-deploy. When called with a session context, only that session's deployments are listed; pass all=true for every deployment in the runtime namespace.
+    descriptions:
+      zh: "列出通过 container-deploy 创建的 Kubernetes Deployment。带会话上下文时仅列该会话的；传 all=true 列出运行时命名空间全部部署。"
     input_schema:
       type: object
       properties:
         all: { type: boolean }
   - name: helm-install
     description: Install (or upgrade) a Helm chart from the session's repo checkout (chart_path relative to repo root) as a release in the cluster namespace. Values override chart defaults. Runs async; returns once installed or failed.
+    descriptions:
+      zh: "从会话仓库检出中的 Helm chart（chart_path 相对仓库根）安装（或升级）为集群命名空间中的 release。values 覆盖 chart 默认值。异步运行；安装成功或失败时返回。"
     input_schema:
       type: object
       properties:
@@ -147,11 +181,15 @@ tools:
       required: [release_name]
   - name: helm-list
     description: List Helm releases in the cluster namespace.
+    descriptions:
+      zh: "列出集群命名空间中的 Helm release。"
     input_schema:
       type: object
       properties: {}
   - name: helm-status
     description: Show the status of one Helm release.
+    descriptions:
+      zh: "显示某个 Helm release 的状态。"
     input_schema:
       type: object
       properties:
@@ -159,6 +197,8 @@ tools:
       required: [release_name]
   - name: helm-uninstall
     description: Uninstall a Helm release.
+    descriptions:
+      zh: "卸载某个 Helm release。"
     input_schema:
       type: object
       properties:
@@ -166,6 +206,8 @@ tools:
       required: [release_name]
   - name: package-publish
     description: "Publish the repo checkout as a package. Runs the protocol's official CLI inside a containerfile build (buildkit, no image export). Protocols: npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift. Manifest-driven protocols (npm/pypi/cargo/...) read name+version from the package manifest; go/hex/composer/maven/swift/generic need explicit name+version (+file for generic)."
+    descriptions:
+      zh: "把仓库检出发布为包。在 containerfile 构建内运行该协议的官方 CLI（buildkit，不导出镜像）。协议：npm,pypi,cargo,rubygems,helm,nuget,maven,go,hex,composer,generic,conan,pub,swift。清单驱动的协议（npm/pypi/cargo/...）从包清单读取 name+version；go/hex/composer/maven/swift/generic 需要显式 name+version（generic 还需 file）。"
     input_schema:
       type: object
       properties:
@@ -180,6 +222,8 @@ tools:
       required: [protocol]
   - name: list-registry-packages
     description: List packages and versions stored in the artifact registry (all protocols).
+    descriptions:
+      zh: "列出 artifact registry 中存储的包与版本（全部协议）。"
     input_schema:
       type: object
       properties:
@@ -187,11 +231,15 @@ tools:
         name: { type: string }
   - name: list-containerfile-templates
     description: List built-in Containerfile/build templates.
+    descriptions:
+      zh: "列出内置的 Containerfile/构建模板。"
     input_schema:
       type: object
       properties: {}
   - name: pull-git-repo
     description: Clone a remote git repository into jjlab local storage (org 'external').
+    descriptions:
+      zh: "把远程 git 仓库克隆进 jjlab 本地存储（org 'external'）。"
     input_schema:
       type: object
       properties:
@@ -200,6 +248,8 @@ tools:
       required: [git_url]
   - name: sandbox-download
     description: Download a previously uploaded file (referenced as file:<code>) into the session sandbox at the given path. The bytes come from the agent's file store; use this to bring attachments into the workspace so shell/docs tooling can reach them.
+    descriptions:
+      zh: "把之前上传的文件（以 file:<code> 引用）下载到会话沙箱的指定路径。字节来自 agent 的文件存储；用于把附件带入工作区供 shell/文档工具访问。"
     input_schema:
       type: object
       properties:

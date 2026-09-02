@@ -176,7 +176,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err := s.sandboxFileWrite(ctx, sc.cid, path, data); err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("sandbox-download failed: %w", err)
 				}
-				return extension.ToolResultData{Content: fmt.Sprintf("Downloaded file %s → sandbox path '%s' (%d bytes).", code, path, len(data))}, nil
+				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Downloaded file %s → sandbox path '%s' (%d bytes).", code, path, len(data)), fmt.Sprintf("已将文件 %s 下载到沙箱路径 '%s'（%d 字节）。", code, path, len(data)))}, nil
 			},
 		},
 		"sandbox-write": {
@@ -189,7 +189,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err := s.sandboxFileWrite(ctx, sc.cid, path, []byte(strArg(args, "content"))); err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("sandbox-write failed: %w", err)
 				}
-				return extension.ToolResultData{Content: fmt.Sprintf("Wrote sandbox file '%s'.", path)}, nil
+				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Wrote sandbox file '%s'.", path), fmt.Sprintf("已写入沙箱文件 '%s'。", path))}, nil
 			},
 		},
 		"sandbox-edit": {
@@ -323,7 +323,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("container-build failed: %w", err)
 				}
-				out, err := s.awaitOpsTask(ctx, "build", fullImage, id)
+				out, err := s.awaitOpsTaskProgress(ctx, "build", fullImage, id, callID)
 				return extension.ToolResultData{Content: out}, err
 			},
 		},
@@ -367,7 +367,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("container-deploy failed: %w", err)
 				}
-				return extension.ToolResultData{Content: fmt.Sprintf("Deployed '%s' from %s.", name, image)}, nil
+				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Deployed '%s' from %s.", name, image), fmt.Sprintf("已从 %s 部署 '%s'。", image, name))}, nil
 			},
 		},
 		"image-list": {
@@ -399,8 +399,10 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if release == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-install: missing 'release_name'")
 				}
-				// chart_path is repo-relative; the chart is resolved by jjlab's
-				// helm (a path/URL the caller provides).
+				// chart_path is repo-relative; jjlab materializes an absolute
+				// chart directory from the session's workspace when we pass the
+				// org/repo/bookmark (its helm v4 can't resolve a bare relative
+				// path or an archive URL).
 				chart := strArg(args, "chart_path")
 				if chart == "" {
 					chart = strArg(args, "chart")
@@ -409,6 +411,13 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					"release_name": release,
 					"chart":        chart,
 				}
+				if ws, _, werr := s.resolveWorkspace(ctx, args, sessionName); werr == nil {
+					payload["org"] = ws.org
+					payload["repo"] = ws.repo
+					payload["bookmark"] = ws.bookmark
+				} else {
+					payload["namespace"] = s.runtimeNamespace
+				}
 				if v := args["values"]; v != nil {
 					payload["values"] = v
 				}
@@ -416,7 +425,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("helm-install failed: %w", err)
 				}
-				out, err := s.awaitOpsTask(ctx, "helm", release, id)
+				out, err := s.awaitOpsTask(ctx, "helm", release, id, callID)
 				return extension.ToolResultData{Content: out}, err
 			},
 		},
@@ -445,7 +454,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err := s.httpDelete(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)+"?namespace="+url.QueryEscape(s.runtimeNamespace)); err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall failed: %w", err)
 				}
-				return extension.ToolResultData{Content: fmt.Sprintf("Uninstalled helm release %q", name)}, nil
+				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Uninstalled helm release %q", name), fmt.Sprintf("已卸载 Helm release %q", name))}, nil
 			},
 		},
 		"package-publish": {
