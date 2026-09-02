@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jsonwrite"
+	"github.com/zergx-platform/ops-extension/internal/jsonwrite"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jjlab"
+	"github.com/zergx-platform/ops-extension/internal/jjlab"
 	"strings"
 )
 

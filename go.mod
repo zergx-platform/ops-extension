@@ -1,4 +1,4 @@
-module forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension
+module github.com/zergx-platform/ops-extension
 
 go 1.26.3
 

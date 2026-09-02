@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jjlab"
+	"github.com/zergx-platform/ops-extension/internal/jjlab"
 )
 
 // --- flat tarball fixture (jjlab archive has no top-level dir) --------

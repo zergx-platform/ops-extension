@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jjlab"
+	"github.com/zergx-platform/ops-extension/internal/jjlab"
 )
 
 // sandboxCtx is the resolved per-call sandbox context: which workspace, which

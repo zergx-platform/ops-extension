@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jsonwrite"
+	"github.com/zergx-platform/ops-extension/internal/jsonwrite"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/env"
+	"github.com/zergx-platform/ops-extension/internal/env"
 	"os"
 	"sync"
 
@@ -21,8 +21,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/jjlab"
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/worker"
+	"github.com/zergx-platform/ops-extension/internal/jjlab"
+	"github.com/zergx-platform/ops-extension/internal/worker"
 )
 
 //go:embed manifest.yaml

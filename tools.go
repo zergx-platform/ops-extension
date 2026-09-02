@@ -12,7 +12,7 @@ import (
 	abcprotocol "github.com/abcp-sdk/abc-protocol-go"
 	"github.com/abcp-sdk/abc-protocol-go/extension"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/worker"
+	"github.com/zergx-platform/ops-extension/internal/worker"
 )
 
 // handlers returns the NATS tool handlers. Descriptions/schemas live in

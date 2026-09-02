@@ -7,7 +7,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"forgejo.develop.10.199.64.20.nip.io/zergx/ops-extension/internal/worker"
+	"github.com/zergx-platform/ops-extension/internal/worker"
 )
 
 var wsUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
