@@ -55,7 +55,7 @@ func main() {
 	port := envOr("ZERGX_PORT", "8080")
 	// jjlab replaces the old repo-manager (archive + contents + clone).
 	// The cluster service is named repo (jjlab is the binary).
-	jj := envOr("ZERGX_JJ_SERVER_URL", envOr("ZERGX_REPO_MANAGER_URL", "http://jjlab.zergx.svc.cluster.local:80"))
+	jj := envOr("ZERGX_JJ_SERVER_URL", envOr("ZERGX_REPO_MANAGER_URL", "http://jj-lab.temp.svc.cluster.local:80"))
 	// Artifact registry replaces zot (OCI store) + the legacy registry (metadata):
 	// one base URL serves /v2 (OCI), /pkgs/<format> (protocol proxies) and
 	// /pkgs/system (admin/metadata). This is the plain-HTTP in-cluster base
