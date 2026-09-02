@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"forgejo.develop.10.199.64.20.nip.io/abc-protocol/sdk-go/extension"
+	"github.com/abcp-sdk/abc-protocol-go/extension"
 )
 
 // publishSandboxVars projects the session's sandbox state into the shared KV
