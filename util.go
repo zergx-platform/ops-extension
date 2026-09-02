@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -26,6 +29,25 @@ func strVal(v map[string]interface{}) string {
 	}
 	return ""
 }
+
+// strField extracts a named string field from a JSON map reply.
+func strField(v map[string]interface{}, k string) string {
+	if s, ok := v[k].(string); ok {
+		return s
+	}
+	return ""
+}
+
+// shortID abbreviates a long id (commit/change sha) for readable output.
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+// errNotFoundForHTTP marks a 404-style not-found (mirrors repo-extension).
+var errNotFoundForHTTP = errors.New("not found")
 
 // param extracts a URL param from a chi-routed request.
 func param(r *http.Request, key string) string {
@@ -117,6 +139,54 @@ func (s *server) sandboxFileWrite(ctx context.Context, cid, path string, data []
 	}
 	return nil
 }
+
+// sandboxFileStat stats a sandbox path via the worker file_read RPC (a bare
+// stat is unavailable, so a successful read implies existence). Returns a
+// synthesized FileInfo-like map with an `is_dir` flag derived from a trailing
+// slash or the file_list reply shape.
+func (s *server) sandboxFileStat(ctx context.Context, cid, path string) (os.FileInfo, error) {
+	// Prefer a proper stat via the worker's file_list on the exact path.
+	res, err := s.workerCommand(ctx, cid, "file_list", map[string]interface{}{"path": path})
+	if err != nil {
+		return nil, fmt.Errorf("file_list %s: %w", path, err)
+	}
+	files, _ := rawMap(res)["files"].([]interface{})
+	isDir := len(files) > 0 || strings.HasSuffix(path, "/")
+	if len(files) == 0 && !strings.HasSuffix(path, "/") {
+		// Single file: fall back to a read to confirm existence.
+		if _, rerr := s.sandboxFileRead(ctx, cid, path); rerr != nil {
+			return nil, rerr
+		}
+	}
+	return syntheticFileInfo{isDir: isDir}, nil
+}
+
+// sandboxFileList returns the files under a sandbox path (a directory, or the
+// single file) as a list of {path, size, content(base64)}.
+func (s *server) sandboxFileList(ctx context.Context, cid, path string) ([]map[string]interface{}, error) {
+	res, err := s.workerCommand(ctx, cid, "file_list", map[string]interface{}{"path": path})
+	if err != nil {
+		return nil, fmt.Errorf("file_list %s: %w", path, err)
+	}
+	files, _ := rawMap(res)["files"].([]interface{})
+	out := make([]map[string]interface{}, 0, len(files))
+	for _, f := range files {
+		if m, ok := f.(map[string]interface{}); ok {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// syntheticFileInfo is a minimal os.FileInfo for sandboxFileStat.
+type syntheticFileInfo struct{ isDir bool }
+
+func (s syntheticFileInfo) Name() string       { return "" }
+func (s syntheticFileInfo) Size() int64        { return 0 }
+func (s syntheticFileInfo) Mode() os.FileMode  { return 0 }
+func (s syntheticFileInfo) ModTime() time.Time { return time.Time{} }
+func (s syntheticFileInfo) IsDir() bool        { return s.isDir }
+func (s syntheticFileInfo) Sys() interface{}   { return nil }
 
 // inferRepoFromGitURL mirrors the old registry helper: strip scheme, trailing
 // slash and ".git", then take the last path segment as the repo name.

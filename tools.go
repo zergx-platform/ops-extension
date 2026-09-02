@@ -694,8 +694,16 @@ func rawMap(v interface{}) map[string]interface{} {
 	return map[string]interface{}{}
 }
 
-// portFile copies a file from the sandbox into the session's jj repo
-// (Contents API). The workspace bookmark is the destination branch.
+// portFile copies a file (or a whole directory, recursively) from the sandbox
+// into the session's jj repo as ONE atomic change. The workspace bookmark is
+// the destination branch.
+//
+//   - single file: reads via worker file_read, then PUTs the repo contents API
+//     with an optimistic-lock base blob sha (a concurrent change is rejected).
+//   - directory: walks it via worker file_list, reads repo blob sha per target
+//     file, then POSTs `contents/batch` (atomic, single change id).
+//
+// On success the change id is returned so the agent can track/review the edit.
 func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]interface{}) (string, error) {
 	sandboxPath := strArg(args, "sandbox_path")
 	repoPath := strArg(args, "repo_path")
@@ -704,24 +712,104 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 		message = "port " + sandboxPath
 	}
 
-	// 1. Read from sandbox (worker) via native file_read.
-	data, err := s.sandboxFileRead(ctx, sc.cid, sandboxPath)
+	basePath := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents",
+		s.jj, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo))
+
+	// Determine whether sandbox_path is a directory.
+	info, err := s.sandboxFileStat(ctx, sc.cid, sandboxPath)
 	if err != nil {
-		return "", fmt.Errorf("port sandbox read failed: %w", err)
+		return "", fmt.Errorf("port sandbox stat failed: %w", err)
 	}
 
-	// 2. Write to jjlab via the contents API (Gitea-style: ?ref= + base64 content).
+	if !info.IsDir() {
+		// Single file: read + optimistic-lock PUT.
+		data, err := s.sandboxFileRead(ctx, sc.cid, sandboxPath)
+		if err != nil {
+			return "", fmt.Errorf("port sandbox read failed: %w", err)
+		}
+		sha, err := s.repoBlobSha(ctx, sc.ws.org, sc.ws.repo, repoPath, sc.ws.bookmark)
+		if err != nil && !errors.Is(err, errNotFoundForHTTP) {
+			return "", fmt.Errorf("port read repo sha failed: %w", err)
+		}
+		url := fmt.Sprintf("%s/%s?ref=%s", basePath, escapePath(repoPath), urlPathEscape(sc.ws.bookmark))
+		body := map[string]interface{}{
+			"content_base64": base64Encode(string(data)),
+			"branch":         sc.ws.bookmark,
+			"message":        message,
+		}
+		if sha != "" {
+			body["sha"] = sha
+		}
+		var resp map[string]interface{}
+		if err := s.httpPutJSONMap(ctx, url, body, &resp); err != nil {
+			return "", fmt.Errorf("port write failed: %w", err)
+		}
+		changeID := strField(resp, "change_id")
+		if changeID == "" {
+			changeID = strField(resp, "commit_id")
+		}
+		return fmt.Sprintf("Ported '%s' to repo '%s' (change %s).", sandboxPath, repoPath, shortID(changeID)), nil
+	}
+
+	// Directory: expand via worker file_list, then batch write (atomic).
+	files, err := s.sandboxFileList(ctx, sc.cid, sandboxPath)
+	if err != nil {
+		return "", fmt.Errorf("port sandbox list failed: %w", err)
+	}
+	if len(files) == 0 {
+		return "", fmt.Errorf("port sandbox directory '%s' is empty", sandboxPath)
+	}
+	edits := make([]map[string]interface{}, 0, len(files))
+	for _, f := range files {
+		rel := f["path"].(string)
+		target := repoPath
+		if target == "" || strings.HasSuffix(target, "/") {
+			target = strings.TrimRight(repoPath, "/") + "/" + rel
+		} else {
+			target = target + "/" + rel
+		}
+		contentBase64, _ := f["content"].(string)
+		sha, serr := s.repoBlobSha(ctx, sc.ws.org, sc.ws.repo, target, sc.ws.bookmark)
+		if serr != nil && !errors.Is(serr, errNotFoundForHTTP) {
+			return "", fmt.Errorf("port read repo sha failed: %w", serr)
+		}
+		edit := map[string]interface{}{"path": target, "content_base64": contentBase64, "branch": sc.ws.bookmark}
+		if sha != "" {
+			edit["sha"] = sha
+		}
+		edits = append(edits, edit)
+	}
+	var resp map[string]interface{}
+	if err := s.httpPostJSONMap(ctx, basePath+"/batch", map[string]interface{}{
+		"branch":  sc.ws.bookmark,
+		"message": message,
+		"files":   edits,
+	}, &resp); err != nil {
+		return "", fmt.Errorf("port batch write failed: %w", err)
+	}
+	changeID := strField(resp, "change_id")
+	if changeID == "" {
+		changeID = strField(resp, "commit_id")
+	}
+	return fmt.Sprintf("Ported directory '%s' to repo '%s' (%d file(s), change %s).", sandboxPath, repoPath, len(edits), shortID(changeID)), nil
+}
+
+// repoBlobSha returns the current blob sha for a path at a ref, or "" when the
+// file does not exist yet (so a create may proceed without a base).
+func (s *server) repoBlobSha(ctx context.Context, org, repo, path, ref string) (string, error) {
 	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents/%s?ref=%s",
-		s.jj, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo), escapePath(repoPath), urlPathEscape(sc.ws.bookmark))
-	body := map[string]interface{}{
-		"content_base64": base64Encode(string(data)),
-		"branch":         sc.ws.bookmark,
-		"message":        message,
+		s.jj, urlPathEscape(org), urlPathEscape(repo), escapePath(path), urlPathEscape(ref))
+	var v map[string]interface{}
+	if err := s.httpGetJSONMap(ctx, url, &v); err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			return "", errNotFoundForHTTP
+		}
+		return "", err
 	}
-	if _, err := s.httpPutJSON(ctx, url, body); err != nil {
-		return "", fmt.Errorf("port write failed: %w", err)
+	if s, ok := v["sha"].(string); ok {
+		return s, nil
 	}
-	return fmt.Sprintf("Ported '%s' to repo '%s'.", sandboxPath, repoPath), nil
+	return "", nil
 }
 
 // imageList queries the artifact registry's OCI catalog (GET /v2/_catalog)

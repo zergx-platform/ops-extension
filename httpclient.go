@@ -43,6 +43,30 @@ func (s *server) httpGetJSON(ctx context.Context, url string) (string, error) {
 	return toJSON(v), nil
 }
 
+// httpGetJSONMap fetches a URL and decodes the response into a map.
+func (s *server) httpGetJSONMap(ctx context.Context, url string, out *map[string]interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	s.addAuth(req)
+	client := defaultClient
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var v map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return err
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("GET %s: %d %s", redactURL(url), resp.StatusCode, toJSON(v))
+	}
+	*out = v
+	return nil
+}
+
 // httpPostJSON POSTs a JSON body and returns the pretty-printed response.
 func (s *server) httpPostJSON(ctx context.Context, url string, body interface{}) (string, error) {
 	b, err := json.Marshal(body)
@@ -71,6 +95,35 @@ func (s *server) httpPostJSON(ctx context.Context, url string, body interface{})
 	return toJSON(v), nil
 }
 
+// httpPostJSONMap POSTs a JSON body and decodes the response into a map.
+func (s *server) httpPostJSONMap(ctx context.Context, url string, body interface{}, out *map[string]interface{}) error {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	s.addAuth(req)
+	client := defaultClient
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var v map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return err
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("POST %s: %d %s", redactURL(url), resp.StatusCode, toJSON(v))
+	}
+	*out = v
+	return nil
+}
+
 // httpPutJSON PUTs a JSON body and returns the pretty-printed response.
 func (s *server) httpPutJSON(ctx context.Context, url string, body interface{}) (string, error) {
 	b, err := json.Marshal(body)
@@ -97,6 +150,35 @@ func (s *server) httpPutJSON(ctx context.Context, url string, body interface{}) 
 		return "", fmt.Errorf("PUT %s: %d %s", redactURL(url), resp.StatusCode, toJSON(v))
 	}
 	return toJSON(v), nil
+}
+
+// httpPutJSONMap PUTs a JSON body and decodes the response into a map.
+func (s *server) httpPutJSONMap(ctx context.Context, url string, body interface{}, out *map[string]interface{}) error {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	s.addAuth(req)
+	client := defaultClient
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var v map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return err
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("PUT %s: %d %s", redactURL(url), resp.StatusCode, toJSON(v))
+	}
+	*out = v
+	return nil
 }
 
 // httpDelete issues a DELETE request and ignores the (typically empty) body.
