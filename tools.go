@@ -701,7 +701,7 @@ func rawMap(v interface{}) map[string]interface{} {
 //   - single file: reads via worker file_read, then PUTs the repo contents API
 //     with an optimistic-lock base blob sha (a concurrent change is rejected).
 //   - directory: walks it via worker file_list, reads repo blob sha per target
-//     file, then POSTs `contents/batch` (atomic, single change id).
+//     file, then POSTs `batch` (atomic, single change id).
 //
 // On success the change id is returned so the agent can track/review the edit.
 func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]interface{}) (string, error) {
@@ -712,7 +712,7 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 		message = "port " + sandboxPath
 	}
 
-	basePath := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents",
+	commitsPath := fmt.Sprintf("%s/api/v1/repos/%s/%s/commits",
 		s.jj, urlPathEscape(sc.ws.org), urlPathEscape(sc.ws.repo))
 
 	// Determine whether sandbox_path is a directory.
@@ -722,7 +722,7 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 	}
 
 	if !info.IsDir() {
-		// Single file: read + optimistic-lock PUT.
+		// Single file: read + optimistic-lock commit (one action).
 		data, err := s.sandboxFileRead(ctx, sc.cid, sandboxPath)
 		if err != nil {
 			return "", fmt.Errorf("port sandbox read failed: %w", err)
@@ -731,17 +731,20 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 		if err != nil && !errors.Is(err, errNotFoundForHTTP) {
 			return "", fmt.Errorf("port read repo sha failed: %w", err)
 		}
-		url := fmt.Sprintf("%s/%s?ref=%s", basePath, escapePath(repoPath), urlPathEscape(sc.ws.bookmark))
-		body := map[string]interface{}{
+		action := map[string]interface{}{
+			"action":         "update",
+			"path":           repoPath,
 			"content_base64": base64Encode(string(data)),
-			"branch":         sc.ws.bookmark,
-			"message":        message,
 		}
 		if sha != "" {
-			body["sha"] = sha
+			action["sha"] = sha
 		}
 		var resp map[string]interface{}
-		if err := s.httpPutJSONMap(ctx, url, body, &resp); err != nil {
+		if err := s.httpPostJSONMap(ctx, commitsPath, map[string]interface{}{
+			"branch":  sc.ws.bookmark,
+			"message": message,
+			"actions": []interface{}{action},
+		}, &resp); err != nil {
 			return "", fmt.Errorf("port write failed: %w", err)
 		}
 		changeID := strField(resp, "change_id")
@@ -751,7 +754,7 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 		return fmt.Sprintf("Ported '%s' to repo '%s' (change %s).", sandboxPath, repoPath, shortID(changeID)), nil
 	}
 
-	// Directory: expand via worker file_list, then batch write (atomic).
+	// Directory: expand via worker file_list, then one atomic commit (multi-action).
 	files, err := s.sandboxFileList(ctx, sc.cid, sandboxPath)
 	if err != nil {
 		return "", fmt.Errorf("port sandbox list failed: %w", err)
@@ -759,7 +762,7 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 	if len(files) == 0 {
 		return "", fmt.Errorf("port sandbox directory '%s' is empty", sandboxPath)
 	}
-	edits := make([]map[string]interface{}, 0, len(files))
+	actions := make([]map[string]interface{}, 0, len(files))
 	for _, f := range files {
 		rel := f["path"].(string)
 		target := repoPath
@@ -773,25 +776,25 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 		if serr != nil && !errors.Is(serr, errNotFoundForHTTP) {
 			return "", fmt.Errorf("port read repo sha failed: %w", serr)
 		}
-		edit := map[string]interface{}{"path": target, "content_base64": contentBase64, "branch": sc.ws.bookmark}
+		action := map[string]interface{}{"action": "update", "path": target, "content_base64": contentBase64}
 		if sha != "" {
-			edit["sha"] = sha
+			action["sha"] = sha
 		}
-		edits = append(edits, edit)
+		actions = append(actions, action)
 	}
 	var resp map[string]interface{}
-	if err := s.httpPostJSONMap(ctx, basePath+"/batch", map[string]interface{}{
+	if err := s.httpPostJSONMap(ctx, commitsPath, map[string]interface{}{
 		"branch":  sc.ws.bookmark,
 		"message": message,
-		"files":   edits,
+		"actions": actions,
 	}, &resp); err != nil {
-		return "", fmt.Errorf("port batch write failed: %w", err)
+		return "", fmt.Errorf("port commit write failed: %w", err)
 	}
 	changeID := strField(resp, "change_id")
 	if changeID == "" {
 		changeID = strField(resp, "commit_id")
 	}
-	return fmt.Sprintf("Ported directory '%s' to repo '%s' (%d file(s), change %s).", sandboxPath, repoPath, len(edits), shortID(changeID)), nil
+	return fmt.Sprintf("Ported directory '%s' to repo '%s' (%d file(s), change %s).", sandboxPath, repoPath, len(actions), shortID(changeID)), nil
 }
 
 // repoBlobSha returns the current blob sha for a path at a ref, or "" when the
