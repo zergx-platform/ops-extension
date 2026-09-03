@@ -54,3 +54,9 @@ func parseSessionName(name string) (org, repo, bookmark string, ok bool) {
 func sessionKey(session string) string {
 	return labelKey(session)
 }
+
+// tryParseSession is a soft variant of parseSessionName that returns ok=false
+// rather than panicking/signing on malformed names (used by service-list).
+func tryParseSession(name string) (org, repo, bookmark string, ok bool) {
+	return parseSessionName(name)
+}

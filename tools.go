@@ -390,25 +390,53 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Deployed '%s' from %s.", name, image), fmt.Sprintf("已从 %s 部署 '%s'。", image, name))}, nil
 			},
 		},
-		"image-list": {
+		"container-search": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/images")
-				return extension.ToolResultData{Content: v}, err
-			},
-		},
-		"deployment-list": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+				// Search the OCI image registry. Default: all cached/published
+				// images (incl. library/* base images like go:alpine). Optional
+				// repo=<org/repo> filters to images built from that source repo;
+				// source=push|pull filters origin; all=true returns everything.
+				repo := strArg(args, "repo")
+				src := strArg(args, "source")
+				q := url.Values{}
+				if repo != "" {
+					q.Set("repo", repo)
+				}
+				if src != "" {
+					q.Set("source", src)
+				}
 				all := boolArg(args, "all")
-				u := s.jj + "/api/v1/ops/services"
-				if !all && sessionName != "" {
-					// Session-scoped deployments live in the runtime namespace;
-					// jjlab lists by namespace + name, so filter client-side by
-					// the session-derived service name prefix.
-					u = s.jj + "/api/v1/ops/services"
+				if all {
+					q.Set("all", "1")
+				}
+				u := s.jj + "/api/v1/ops/images"
+				if s := q.Encode(); s != "" {
+					u += "?" + s
 				}
 				v, err := s.httpGetJSON(ctx, u)
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("deployment-list failed: %w", err)
+					return extension.ToolResultData{}, fmt.Errorf("container-search failed: %w", err)
+				}
+				return extension.ToolResultData{Content: v}, nil
+			},
+		},
+		"service-list": {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+				all := boolArg(args, "all")
+				u := s.jj + "/api/v1/ops/services"
+				v, err := s.httpGetJSON(ctx, u)
+				if err != nil {
+					return extension.ToolResultData{}, fmt.Errorf("service-list failed: %w", err)
+				}
+				// Ops-extension owns the session/purpose semantics: filter the
+				// jjlab-returned (opaque annotations) to the caller's session
+				// when not all=true.
+				if !all && sessionName != "" {
+					if _, _, _, ok := tryParseSession(sessionName); ok && v != "" {
+						if filtered := filterServicesBySession(v, sessionName); filtered != "" {
+							v = filtered
+						}
+					}
 				}
 				return extension.ToolResultData{Content: v}, nil
 			},
@@ -499,15 +527,17 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				return extension.ToolResultData{Content: res}, err
 			},
 		},
-		"list-registry-packages": {
+		"packages-search": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/packages")
-				return extension.ToolResultData{Content: v}, err
-			},
-		},
-		"list-containerfile-templates": {
-			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				return extension.ToolResultData{Content: toJSON(builtinTemplates())}, nil
+				u := s.jj + "/api/v1/ops/packages"
+				if p := strArg(args, "protocol"); p != "" {
+					u += "?protocol=" + url.QueryEscape(p)
+				}
+				v, err := s.httpGetJSON(ctx, u)
+				if err != nil {
+					return extension.ToolResultData{}, fmt.Errorf("packages-search failed: %w", err)
+				}
+				return extension.ToolResultData{Content: v}, nil
 			},
 		},
 		"pull-git-repo": {

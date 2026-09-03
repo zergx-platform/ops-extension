@@ -307,25 +307,42 @@ tools:
                   descriptions:
                     zh: CPU 请求/上限（如 250m、1）。
       required: [image]
-  - name: image-list
-    description: List container images in the OCI registry.
+  - name: container-search
+    description: Search container images in the OCI registry. Default returns all cached/published images (incl. library/* base images like docker.io/library/go:alpine); pass repo=<org/repo> to filter images built from that source repo, source=push|pull to filter origin, or all=true.
     descriptions:
-      zh: 列出 OCI registry 中的容器镜像。
+      zh: 检索 OCI registry 中的容器镜像。默认返回全部已缓存/已发布镜像（含 docker.io/library/go:alpine 等基础镜像）；传 repo=<org/repo> 过滤某源仓库构建的镜像、source=push|pull 过滤来源，或 all=true。
     input_schema:
       type: object
-      properties: {}
-  - name: deployment-list
-    description: List Kubernetes deployments created via container-deploy. When called with a session context, only that session's deployments are listed; pass all=true for every deployment in the runtime namespace.
+      properties:
+        repo:
+          type: string
+          description: Source repo (org/repo) to filter images built from it.
+          descriptions:
+            zh: 过滤某源仓库（org/repo）构建的镜像。
+        source:
+          type: string
+          description: Origin filter (push | pull).
+          descriptions:
+            zh: 来源过滤（push | pull）。
+        all:
+          type: boolean
+          description: Include every image (default only cached/published).
+          descriptions:
+            zh: 包含全部镜像（默认仅已缓存/已发布）。
+
+  - name: service-list
+    description: List Kubernetes services (bare sandbox pods + deployments) created through the ops surface. Default lists only the current session's temporary services; pass all=true to list every service in the runtime namespace (incl. shared/public).
     descriptions:
-      zh: 列出通过 container-deploy 创建的 Kubernetes Deployment。带会话上下文时仅列该会话的；传 all=true 列出运行时命名空间全部部署。
+      zh: 列出通过 ops 表面创建的 Kubernetes 服务（bare 沙箱 pod + deployment）。默认仅列当前会话的临时服务；传 all=true 列出运行时命名空间全部（含共享/公共）。
     input_schema:
       type: object
       properties:
         all:
           type: boolean
-          description: Include deployments regardless of the session-scoped label.
+          description: Include every service regardless of session.
           descriptions:
-            zh: 包含与会话标记无关的全部部署。
+            zh: 包含与会话无关的全部服务。
+
   - name: helm-install
     description: Install (or upgrade) a Helm chart from the session's repo checkout (chart_path relative to repo root) as a release in the cluster namespace. Values override chart defaults. Runs async; returns once installed or failed.
     descriptions:
@@ -430,30 +447,20 @@ tools:
           descriptions:
             zh: Dockerfile 的仓库相对路径（默认 ./Dockerfile）。
       required: [protocol]
-  - name: list-registry-packages
-    description: List packages and versions stored in the artifact registry (all protocols).
+  - name: packages-search
+    description: Search packages and their versions stored in the artifact registry (all protocols, incl. git releases stored as format=release).
     descriptions:
-      zh: 列出 artifact registry 中存储的包与版本（全部协议）。
+      zh: 检索 artifact registry 中存储的包与版本（全部协议，含以 format=release 存储的 git release）。
     input_schema:
       type: object
       properties:
         protocol:
           type: string
-          description: Package protocol (npm / pypi / maven / …).
+          description: Package protocol (npm / pypi / maven / release / …).
           descriptions:
-            zh: 包协议（npm / pypi / maven 等）。
-        name:
-          type: string
-          description: Deployment / release name.
-          descriptions:
-            zh: 部署 / release 名称。
-  - name: list-containerfile-templates
-    description: List built-in Containerfile/build templates.
-    descriptions:
-      zh: 列出内置的 Containerfile/构建模板。
-    input_schema:
-      type: object
-      properties: {}
+            zh: 包协议（npm / pypi / maven / release 等）。
+
+
   - name: pull-git-repo
     description: Clone a remote git repository into jjlab local storage (org 'external').
     descriptions:

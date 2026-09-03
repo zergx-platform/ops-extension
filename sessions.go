@@ -182,7 +182,7 @@ func (s *server) createWorker(ctx context.Context, sid, baseImage string) (Conta
 			"WORKER_PORT": "48080",
 		},
 		Annotations: map[string]string{
-			"zergx/session":      sid,
+			"zergx/session":       sid,
 			"zergx/sandbox.image": baseImage,
 		},
 		Namespace: s.runtimeNamespace,
@@ -312,4 +312,28 @@ type ContainerInfo struct {
 	PodIP       string
 	Status      string
 	SessionName string
+}
+
+// filterServicesBySession narrows a jjlab /ops/services JSON response to the
+// services carrying a zergx/session annotation equal to `session` (opaque
+// metadata we own at the tools layer; jjlab never interprets it).
+func filterServicesBySession(body, session string) string {
+	var in struct {
+		Services []map[string]interface{} `json:"services"`
+	}
+	if jerr := json.Unmarshal([]byte(body), &in); jerr != nil || in.Services == nil {
+		return ""
+	}
+	var out []map[string]interface{}
+	for _, svc := range in.Services {
+		ann, _ := svc["annotations"].(map[string]interface{})
+		if s, _ := ann["zergx/session"].(string); s == session {
+			out = append(out, svc)
+		}
+	}
+	enc, err := json.Marshal(map[string]interface{}{"services": out})
+	if err != nil {
+		return ""
+	}
+	return string(enc)
 }
