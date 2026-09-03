@@ -134,17 +134,23 @@ func (s *server) jjBookmarkHead(ctx context.Context, org, repo, bm string) (stri
 	return "", fmt.Errorf("bookmark %q not found in %s/%s", bm, org, repo)
 }
 
-// ensureSandbox resolves the workspace, ensures the session's worker pod
-// exists (get-or-create via jjlab), and — when needSync — that the pod's
-// workspace matches the bookmark head (sync executed server-side by jjlab).
+// ensureSandbox resolves the workspace and requires the session's worker pod
+// to already exist (created explicitly via sandbox-create). It does NOT create
+// the pod: sandbox-* tools fail with a clear "create first" error when the pod
+// is absent, so the agent must explicitly choose a base image. When pod exists
+// and needSync, the workspace bookmark head is synced in (server-side by jjlab).
 func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{}, sessionName string, needSync bool) (sandboxCtx, error) {
 	ws, sid, err := s.resolveWorkspace(ctx, args, sessionName)
 	if err != nil {
 		return sandboxCtx{}, err
 	}
-	info, err := s.ensureWorker(ctx, sid)
+	info, err := s.workerInfo(ctx, labelKey(sid))
 	if err != nil {
-		return sandboxCtx{}, fmt.Errorf("ensure container for %s: %w", sid, err)
+		// A missing service = pod not created yet.
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			return sandboxCtx{}, fmt.Errorf("sandbox not created — call sandbox-create with an image first")
+		}
+		return sandboxCtx{}, fmt.Errorf("inspect sandbox for %s: %w", sid, err)
 	}
 	s.publishSandboxVars(ctx, sid, info)
 	sc := sandboxCtx{session: sid, cid: info.ContainerID, ws: ws}
@@ -161,21 +167,23 @@ func (s *server) ensureSandbox(ctx context.Context, args map[string]interface{},
 // the process, the declared containerPort and the readiness probe in sync.
 const sandboxWorkerPort = 48080
 
-// ensureWorker get-or-creates the session's worker pod through jjlab (a bare
-// `zergx-worker` service with a zergx/session annotation preserving the raw
-// session name) and returns its container info.
-func (s *server) ensureWorker(ctx context.Context, sid string) (ContainerInfo, error) {
+// createWorker explicitly creates the session's worker pod from a chosen base
+// image. When a pod already exists for the session it is reused (get-or-create)
+// so sandbox-create is idempotent; the base image is carried as the
+// `zergx/sandbox.image` annotation which jjlab uses to derive the worker image.
+func (s *server) createWorker(ctx context.Context, sid, baseImage string) (ContainerInfo, error) {
 	key := labelKey(sid)
 	st, err := s.jjops.EnsureService(ctx, jjlab.ServiceRequest{
 		Name:  key,
-		Image: s.workerImage,
+		Image: baseImage,
 		Kind:  "bare",
 		Ports: []jjlab.PortSpec{{Container: sandboxWorkerPort, Service: 80}},
 		Env: map[string]string{
 			"WORKER_PORT": "48080",
 		},
 		Annotations: map[string]string{
-			"zergx/session": sid,
+			"zergx/session":      sid,
+			"zergx/sandbox.image": baseImage,
 		},
 		Namespace: s.runtimeNamespace,
 	})

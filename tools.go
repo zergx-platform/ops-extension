@@ -23,6 +23,26 @@ import (
 // files are never deleted) before running.
 func (s *server) handlers() map[string]extension.ToolSpec {
 	return map[string]extension.ToolSpec{
+		"sandbox-create": {
+			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
+				image := strArg(args, "image")
+				if image == "" {
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-create: missing 'image' (base image jjlab can pull)")
+				}
+				_, sid, err := s.resolveWorkspace(ctx, args, sessionName)
+				if err != nil {
+					return extension.ToolResultData{}, err
+				}
+				info, err := s.createWorker(ctx, sid, image)
+				if err != nil {
+					return extension.ToolResultData{}, fmt.Errorf("sandbox-create failed: %w", err)
+				}
+				s.publishSandboxVars(ctx, sid, info)
+				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName,
+					fmt.Sprintf("Created sandbox from %s (container %s, status %s).", image, info.ContainerID, info.Status),
+					fmt.Sprintf("已从 %s 创建沙箱（容器 %s，状态 %s）。", image, info.ContainerID, info.Status))}, nil
+			},
+		},
 		"sandbox-run": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				command := strArg(args, "command")
