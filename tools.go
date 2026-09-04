@@ -274,7 +274,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, err
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "job_stdin", map[string]interface{}{
-					"job-id": strArg(args, "job-id"),
+					"job_id": strArg(args, "job-id"),
 					"data":   strArg(args, "data"),
 				})
 				if err != nil {
@@ -290,7 +290,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, err
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "kill", map[string]interface{}{
-					"job-id": strArg(args, "job-id"),
+					"job_id": strArg(args, "job-id"),
 				})
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-kill failed: %w", err)
@@ -621,7 +621,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 // jobArgs lifts the shared job params (id + output window) for job RPCs.
 func jobArgs(args map[string]interface{}) map[string]interface{} {
 	out := map[string]interface{}{
-		"job-id": strArg(args, "job-id"),
+		"job_id": strArg(args, "job-id"),
 	}
 	if v := args["start"]; v != nil {
 		out["start"] = v
@@ -633,7 +633,7 @@ func jobArgs(args map[string]interface{}) map[string]interface{} {
 		out["grep"] = g
 	}
 	if v := args["timeout-ms"]; v != nil {
-		out["timeout-ms"] = v
+		out["timeout_ms"] = v
 	}
 	return out
 }
