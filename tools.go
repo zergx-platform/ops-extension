@@ -512,7 +512,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					chart = strArg(args, "chart")
 				}
 				payload := map[string]interface{}{
-					"release-name": release,
+					"release_name": release,
 					"chart":        chart,
 				}
 				if ws, _, werr := s.resolveWorkspace(ctx, args, sessionName); werr == nil {

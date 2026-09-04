@@ -41,14 +41,14 @@ type helmInstallBody struct {
 // we simply pass org/repo/bookmark/chart_path through.
 func (s *server) startHelmInstall(b helmInstallBody) string {
 	id, err := s.opsSubmitHelm(context.Background(), map[string]interface{}{
-		"release-name": b.ReleaseName,
+		"release_name": b.ReleaseName,
 		"chart":        b.Chart,
 		"version":      b.Version,
 		"values":       b.Values,
 		"org":          b.Org,
 		"repo":         b.Repo,
 		"bookmark":     b.Bookmark,
-		"chart-path":   b.ChartPath,
+		"chart_path":   b.ChartPath,
 	})
 	if err != nil {
 		// jjlab rejections surface as a failed task id-less error; fabricate
