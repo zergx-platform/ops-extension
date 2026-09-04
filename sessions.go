@@ -337,3 +337,43 @@ func filterServicesBySession(body, session string) string {
 	}
 	return string(enc)
 }
+
+// filterServicesByExtra narrows a jjlab /ops/services JSON response by the
+// tool-layer filters org/repo/kind (read from each service's annotations).
+// It runs client-side over the already-fetched list, mirroring
+// filterServicesBySession — jjlab list returns the annotations verbatim.
+func filterServicesByExtra(body, org, repo, kind string) string {
+	var in struct {
+		Services []map[string]interface{} `json:"services"`
+	}
+	if jerr := json.Unmarshal([]byte(body), &in); jerr != nil || in.Services == nil {
+		return ""
+	}
+	var out []map[string]interface{}
+	for _, svc := range in.Services {
+		if kind != "" {
+			if k, _ := svc["kind"].(string); k != kind {
+				continue
+			}
+		}
+		if org != "" || repo != "" {
+			ann, _ := svc["annotations"].(map[string]interface{})
+			if org != "" {
+				if o, _ := ann["zergx/org"].(string); o != org {
+					continue
+				}
+			}
+			if repo != "" {
+				if r, _ := ann["zergx/repo"].(string); r != repo {
+					continue
+				}
+			}
+		}
+		out = append(out, svc)
+	}
+	enc, err := json.Marshal(map[string]interface{}{"services": out})
+	if err != nil {
+		return ""
+	}
+	return string(enc)
+}

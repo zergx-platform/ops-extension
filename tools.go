@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -351,16 +353,33 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				image := strArg(args, "image")
 				name := strArg(args, "name")
+				defaultTag := ""
+				org, repo, bm := "", "", ""
+				if sessionName != "" {
+					if o, r, b, ok := parseSessionName(sessionName); ok {
+						org, repo, bm = o, r, b
+						defaultTag = b
+					}
+				}
+				// Default the service name to a k8s-safe, globally-unique slug so
+				// deployments never collide across orgs/repos/sessions. A caller
+				// may still pass an explicit `name` (ownership check still applies).
+				if name == "" && org != "" && repo != "" && bm != "" {
+					name = k8sServiceName(org, repo, bm)
+				}
 				if name == "" {
 					name = "app"
 				}
-				// Resolve a bare image name/tag into a fully-qualified reference
-				// against the in-cluster artifact registry (otherwise kubelet
-				// treats "example-server" as docker.io/library/example-server).
-				defaultTag := ""
-				if sessionName != "" {
-					if _, _, bm, ok := parseSessionName(sessionName); ok {
-						defaultTag = bm
+				// Ownership guard: only the session that created a service may
+				// update/scale it. Read the existing service's session annotation
+				// (jjlab status now returns `annotations`); absent annotation
+				// (legacy/service, no zergx/session) is adopted + tagged on first
+				// touch; a mismatched session is rejected with a conflict.
+				existing, err := s.fetchService(ctx, name, s.runtimeNamespace)
+				if err == nil && existing != nil {
+					owner, _ := existing["session"].(string)
+					if owner != "" && owner != sessionName {
+						return extension.ToolResultData{}, fmt.Errorf("service '%s' belongs to a different session (%s); use another name", name, owner)
 					}
 				}
 				image = s.qualifyImage(image, defaultTag)
@@ -370,6 +389,19 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					"image": image,
 					"kind":  "deployment",
 					"ports": []map[string]interface{}{{"container": 8080, "service": 80}},
+				}
+				ann := map[string]string{}
+				if sessionName != "" {
+					ann["zergx/session"] = sessionName
+				}
+				if org != "" {
+					ann["zergx/org"] = org
+				}
+				if repo != "" {
+					ann["zergx/repo"] = repo
+				}
+				if len(ann) > 0 {
+					body["annotations"] = ann
 				}
 				if env := envMapFromArgs(args); len(env) > 0 {
 					body["env"] = env
@@ -383,11 +415,25 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					body["resources"] = res
 				}
 				body["namespace"] = s.runtimeNamespace
-				_, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/services", body)
+				resp, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/services", body)
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("container-deploy failed: %w", err)
 				}
-				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Deployed '%s' from %s.", name, image), fmt.Sprintf("已从 %s 部署 '%s'。", image, name))}, nil
+				// Surface the service's in-cluster DNS address + readiness so the
+				// sandbox (same runtime namespace) can reach it by name, and the
+				// agent knows the endpoint to reference.
+				svcHost := fmt.Sprintf("%s.%s.svc.cluster.local", name, s.runtimeNamespace)
+				ready := "unknown"
+				var pm map[string]interface{}
+				if jerr := json.Unmarshal([]byte(resp), &pm); jerr == nil {
+					if r, ok := pm["ready"].(bool); ok {
+						ready = fmt.Sprintf("%v", r)
+					}
+				}
+				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName,
+					fmt.Sprintf("Deployed '%s' from %s. In-cluster address: http://%s:80 (ready=%s). The sandbox can reach it via this hostname.", name, image, svcHost, ready),
+					fmt.Sprintf("已从 %s 部署 '%s'。集群内地址：http://%s:80（ready=%s）。沙箱可直接用该主机名访问。", image, name, svcHost, ready)),
+					Data: map[string]interface{}{"name": name, "image": image, "svc": svcHost, "url": "http://" + svcHost + ":80", "ready": ready}}, nil
 			},
 		},
 		"container-search": {
@@ -423,20 +469,30 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		"service-list": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				all := boolArg(args, "all")
+				org := strArg(args, "org")
+				repo := strArg(args, "repo")
+				kind := strArg(args, "kind")
 				u := s.jj + "/api/v1/ops/services"
+				if ns := strArg(args, "namespace"); ns != "" {
+					u += "?namespace=" + url.QueryEscape(ns)
+				}
 				v, err := s.httpGetJSON(ctx, u)
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("service-list failed: %w", err)
 				}
-				// Ops-extension owns the session/purpose semantics: filter the
-				// jjlab-returned (opaque annotations) to the caller's session
-				// when not all=true.
 				if !all && sessionName != "" {
 					if _, _, _, ok := tryParseSession(sessionName); ok && v != "" {
 						if filtered := filterServicesBySession(v, sessionName); filtered != "" {
 							v = filtered
 						}
 					}
+				}
+				// Additional tool-layer filters (org/repo/kind) over the returned
+				// annotations/kind. jjlab list returns these; we slice here so the
+				// caller can narrow to e.g. only formal services (kind=deployment)
+				// or a specific org/repo without backend support.
+				if org != "" || repo != "" || kind != "" {
+					v = filterServicesByExtra(v, org, repo, kind)
 				}
 				return extension.ToolResultData{Content: v}, nil
 			},
@@ -589,8 +645,65 @@ func strArg(args map[string]interface{}, k string) string {
 	return ""
 }
 
-// qualifyImage converts a possibly-bare image reference into a
-// fully-qualified in-cluster reference, mirroring how container-build tags
+// k8sServiceName derives a k8s-safe, globally-unique service name from the
+// workspace triple (org-repo-bookmark), so deployments never collide across
+// orgs/repos/sessions. Falls back to a hash of the raw session when the
+// components exceed the 63-char label limit.
+func k8sServiceName(org, repo, bm string) string {
+	s := strings.ToLower(org + "-" + repo + "-" + bm)
+	// Replace characters that are invalid in a DNS-1123 label.
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			b.WriteRune(r)
+		case r == '.' || r == '_' || r == '/':
+			b.WriteByte('-')
+		default:
+			b.WriteByte('-')
+		}
+	}
+	name := strings.Trim(b.String(), "-")
+	if len(name) <= 63 {
+		return name
+	}
+	// Over-long: hash to stay within the label limit while remaining unique.
+	h := sha256.Sum256([]byte(org + ":" + repo + ":" + bm))
+	return fmt.Sprintf("svc-%x", h[:8])
+}
+
+// fetchService reads a single service's status from jjlab and returns its
+// annotations (keyed flat) or nil when the service does not exist. It lets
+// the deploy path verify ownership via `zergx/session` before mutating a
+// deployment that may already exist.
+func (s *server) fetchService(ctx context.Context, name, namespace string) (map[string]interface{}, error) {
+	u := s.jj + "/api/v1/ops/services/" + url.PathEscape(name)
+	if namespace != "" {
+		u += "?namespace=" + url.QueryEscape(namespace)
+	}
+	raw, err := s.httpGetJSON(ctx, u)
+	if err != nil {
+		// 404 (not found) is the normal "no existing service" case.
+		if strings.Contains(err.Error(), "404") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, err
+	}
+	// Flatten annotations into the returned map under "session" for the
+	// ownership check; callers only need zergx/session here.
+	if ann, ok := out["annotations"].(map[string]interface{}); ok {
+		if s, ok := ann["zergx/session"].(string); ok {
+			out["session"] = s
+		}
+	}
+	return out, nil
+}
+
+// qualifyImage converts a possibly-bare image reference into a fully-qualified in-cluster reference, mirroring how container-build tags
 // images (artifactImageHost/{tag}:{bookmark}). It accepts:
 //   - "example-server"          -> "jj-lab.temp.svc.cluster.local/example-server:<defaultTag>"
 //   - "example-server:main"     -> "jj-lab.temp.svc.cluster.local/example-server:main"

@@ -252,9 +252,9 @@ tools:
             zh: 跳过层缓存（从零构建）。
       required: [dockerfile_path, tag]
   - name: container-deploy
-    description: Deploy a container image as a Kubernetes deployment (with optional nested resource requests/limits).
+    description: Deploy a container image as a Kubernetes deployment (with optional nested resource requests/limits). On success returns the service's in-cluster DNS hostname (<name>.<namespace>.svc.cluster.local) so the sandbox can reach it by name.
     descriptions:
-      zh: 将容器镜像部署为 Kubernetes Deployment（可带嵌套的 resource requests/limits）。
+      zh: 将容器镜像部署为 Kubernetes Deployment（可带嵌套的 resource requests/limits）。成功后返回服务的集群内 DNS 主机名（<name>.<namespace>.svc.cluster.local），沙箱可直接用该主机名访问。
     input_schema:
       type: object
       properties:
@@ -265,9 +265,9 @@ tools:
             zh: 要部署的镜像引用（裸名会在集群内注册表上限定）。
         name:
           type: string
-          description: Deployment / release name.
+          description: 'Deployment name (defaults to a unique org-repo-bookmark slug; a service owned by another session is rejected).'
           descriptions:
-            zh: 部署 / release 名称。
+            zh: '部署名称（默认为唯一的 org-repo-bookmark 派生名；属于其他会话的服务会被拒绝）。'
         resources:
           type: object
           description: CPU / memory requests and limits for the container.
@@ -331,9 +331,9 @@ tools:
             zh: 包含全部镜像（默认仅已缓存/已发布）。
 
   - name: service-list
-    description: List Kubernetes services (bare sandbox pods + deployments) created through the ops surface. Default lists only the current session's temporary services; pass all=true to list every service in the runtime namespace (incl. shared/public).
+    description: List Kubernetes services (bare sandbox pods + deployments) created through the ops surface. Default lists only the current session's temporary services; pass all=true to list every service in the runtime namespace (incl. shared/public). Narrow with org/repo/kind or a specific namespace.
     descriptions:
-      zh: 列出通过 ops 表面创建的 Kubernetes 服务（bare 沙箱 pod + deployment）。默认仅列当前会话的临时服务；传 all=true 列出运行时命名空间全部（含共享/公共）。
+      zh: 列出通过 ops 表面创建的 Kubernetes 服务（bare 沙箱 pod + deployment）。默认仅列当前会话的临时服务；传 all=true 列出运行时命名空间全部（含共享/公共）。可用 org/repo/kind 过滤或指定 namespace。
     input_schema:
       type: object
       properties:
@@ -342,6 +342,26 @@ tools:
           description: Include every service regardless of session.
           descriptions:
             zh: 包含与会话无关的全部服务。
+        org:
+          type: string
+          description: Only services deployed for this org (read from the zergx/org annotation).
+          descriptions:
+            zh: 仅列出属于该组织的服务（读取 zergx/org 注解）。
+        repo:
+          type: string
+          description: Only services deployed for this repository (read from the zergx/repo annotation).
+          descriptions:
+            zh: 仅列出属于该仓库的服务（读取 zergx/repo 注解）。
+        kind:
+          type: string
+          description: Narrow by service kind (deployment = formal service, bare = sandbox/worker pod).
+          descriptions:
+            zh: 按服务类型过滤（deployment = 正式服务，bare = 沙箱/worker pod）。
+        namespace:
+          type: string
+          description: Kubernetes namespace to list (defaults to the ops runtime namespace).
+          descriptions:
+            zh: 要列出的 Kubernetes 命名空间（默认 ops 运行时命名空间）。
 
   - name: helm-install
     description: Install (or upgrade) a Helm chart from the session's repo checkout (chart_path relative to repo root) as a release in the cluster namespace. Values override chart defaults. Runs async; returns once installed or failed.
