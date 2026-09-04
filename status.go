@@ -302,7 +302,7 @@ func (s *server) packagesPublish(w http.ResponseWriter, r *http.Request) {
 		Name       string `json:"name"`
 		Version    string `json:"version"`
 		File       string `json:"file"`
-		Dockerfile string `json:"dockerfile_path"`
+		Dockerfile string `json:"dockerfile-path"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")

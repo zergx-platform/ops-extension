@@ -90,7 +90,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				// The bus is model-facing and carries no streamed deltas, so
 				// the terminal tool result folds the captured output in; the
 				// UI reads live output via the gateway's per-worker SSE proxy.
-				timeoutMs := int(abcprotocol.ArgInt(args, "timeout_ms", 10000))
+				timeoutMs := int(abcprotocol.ArgInt(args, "timeout-ms", 10000))
 				if timeoutMs <= 0 {
 					timeoutMs = 10000
 				}
@@ -120,7 +120,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 						content += "\n[stderr]\n" + sr.done.Stderr
 					}
 					return extension.ToolResultData{Content: content, Data: map[string]interface{}{
-						"job_id":       res.JobID,
+						"job-id":       res.JobID,
 						"exit_code":    sr.done.ExitCode,
 						"backgrounded": false,
 					}}, nil
@@ -160,7 +160,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 						"Command is still running in the background (job %s); it did not finish within %dms. It keeps running in the background and you will be notified on completion. Meanwhile you can inspect current output with sandbox-job-output, or stop it with sandbox-job-kill.",
 						res.JobID, timeoutMs)
 					return extension.ToolResultData{Content: content, Data: map[string]interface{}{
-						"job_id":       res.JobID,
+						"job-id":       res.JobID,
 						"backgrounded": true,
 					}}, nil
 				}
@@ -217,8 +217,8 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		"sandbox-edit": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				path := strArg(args, "path")
-				startLine := intArg64(args, "start_line", 0)
-				endLine := intArg64(args, "end_line", 0)
+				startLine := intArg64(args, "start-line", 0)
+				endLine := intArg64(args, "end-line", 0)
 				content := strArg(args, "content")
 				sc, err := s.ensureSandbox(ctx, args, sessionName, true)
 				if err != nil {
@@ -274,7 +274,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, err
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "job_stdin", map[string]interface{}{
-					"job_id": strArg(args, "job_id"),
+					"job-id": strArg(args, "job-id"),
 					"data":   strArg(args, "data"),
 				})
 				if err != nil {
@@ -290,7 +290,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, err
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "kill", map[string]interface{}{
-					"job_id": strArg(args, "job_id"),
+					"job-id": strArg(args, "job-id"),
 				})
 				if err != nil {
 					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-kill failed: %w", err)
@@ -326,7 +326,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				// Tag defaults to the session bookmark (matching container-build's
 				// historical {tag}:{bookmark}); an explicit image_tag overrides it.
 				ref := image + ":" + ws.bookmarkOrDefault()
-				if imageTag := strArg(args, "image_tag"); imageTag != "" {
+				if imageTag := strArg(args, "image-tag"); imageTag != "" {
 					ref = image + ":" + imageTag
 				}
 				fullImage := s.artifactImageHost + "/" + ref
@@ -336,9 +336,9 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					"bookmark": ws.bookmark,
 					"image":    fullImage,
 					"export":   "push",
-					"no_cache": boolArg(args, "no_cache"),
+					"no-cache": boolArg(args, "no-cache"),
 				}
-				if df := strArg(args, "dockerfile_path"); df != "" {
+				if df := strArg(args, "dockerfile-path"); df != "" {
 					payload["dockerfile"] = df
 				}
 				id, err := s.opsSubmitBuild(ctx, payload)
@@ -499,7 +499,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"helm-install": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				release := strArg(args, "release_name")
+				release := strArg(args, "release-name")
 				if release == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-install: missing 'release_name'")
 				}
@@ -507,12 +507,12 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				// chart directory from the session's workspace when we pass the
 				// org/repo/bookmark (its helm v4 can't resolve a bare relative
 				// path or an archive URL).
-				chart := strArg(args, "chart_path")
+				chart := strArg(args, "chart-path")
 				if chart == "" {
 					chart = strArg(args, "chart")
 				}
 				payload := map[string]interface{}{
-					"release_name": release,
+					"release-name": release,
 					"chart":        chart,
 				}
 				if ws, _, werr := s.resolveWorkspace(ctx, args, sessionName); werr == nil {
@@ -541,7 +541,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"helm-status": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				name := strArg(args, "release_name")
+				name := strArg(args, "release-name")
 				if name == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-status: missing 'release_name'")
 				}
@@ -551,7 +551,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"helm-uninstall": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				name := strArg(args, "release_name")
+				name := strArg(args, "release-name")
 				if name == "" {
 					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall: missing 'release_name'")
 				}
@@ -579,7 +579,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				res, err := s.publishPackage(ctx, protocol, org, repo, bookmark,
 					strArg(args, "name"), strArg(args, "version"),
-					strArg(args, "file"), strArg(args, "dockerfile_path"))
+					strArg(args, "file"), strArg(args, "dockerfile-path"))
 				return extension.ToolResultData{Content: res}, err
 			},
 		},
@@ -598,7 +598,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 		},
 		"pull-git-repo": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
-				gitURL := strArg(args, "git_url")
+				gitURL := strArg(args, "git-url")
 				if gitURL == "" {
 					return extension.ToolResultData{}, fmt.Errorf("pull-git-repo: missing 'git_url'")
 				}
@@ -621,7 +621,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 // jobArgs lifts the shared job params (id + output window) for job RPCs.
 func jobArgs(args map[string]interface{}) map[string]interface{} {
 	out := map[string]interface{}{
-		"job_id": strArg(args, "job_id"),
+		"job-id": strArg(args, "job-id"),
 	}
 	if v := args["start"]; v != nil {
 		out["start"] = v
@@ -632,8 +632,8 @@ func jobArgs(args map[string]interface{}) map[string]interface{} {
 	if g := strArg(args, "grep"); g != "" {
 		out["grep"] = g
 	}
-	if v := args["timeout_ms"]; v != nil {
-		out["timeout_ms"] = v
+	if v := args["timeout-ms"]; v != nil {
+		out["timeout-ms"] = v
 	}
 	return out
 }
@@ -868,8 +868,8 @@ func rawMap(v interface{}) map[string]interface{} {
 //
 // On success the change id is returned so the agent can track/review the edit.
 func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]interface{}) (string, error) {
-	sandboxPath := strArg(args, "sandbox_path")
-	repoPath := strArg(args, "repo_path")
+	sandboxPath := strArg(args, "sandbox-path")
+	repoPath := strArg(args, "repo-path")
 	message := strArg(args, "message")
 	if message == "" {
 		message = "port " + sandboxPath

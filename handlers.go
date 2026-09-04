@@ -68,7 +68,7 @@ func (s *server) jobOutput(w http.ResponseWriter, r *http.Request) {
 	jobID := param(r, "jobID")
 	q := r.URL.Query()
 	res, err := s.workerCommand(r.Context(), key, "job_output", map[string]interface{}{
-		"job_id": jobID,
+		"job-id": jobID,
 		"stream": q.Get("stream"),
 		"start":  parseIntOr(q.Get("start"), -200),
 		"end":    parseIntOr(q.Get("end"), -1),
@@ -84,7 +84,7 @@ func (s *server) jobWait(w http.ResponseWriter, r *http.Request) {
 	key := sessionParam(r)
 	jobID := param(r, "jobID")
 	var b struct {
-		TimeoutMS *int64 `json:"timeout_ms"`
+		TimeoutMS *int64 `json:"timeout-ms"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
 	timeout := int64(30000)
@@ -100,8 +100,8 @@ func (s *server) jobWait(w http.ResponseWriter, r *http.Request) {
 		timeout = 60_000
 	}
 	res, err := s.workerCommand(r.Context(), key, "job_wait", map[string]interface{}{
-		"job_id":     jobID,
-		"timeout_ms": timeout,
+		"job-id":     jobID,
+		"timeout-ms": timeout,
 	})
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
@@ -119,7 +119,7 @@ func (s *server) jobStdin(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&b)
 	res, err := s.workerCommand(r.Context(), key, "job_stdin", map[string]interface{}{
-		"job_id": jobID,
+		"job-id": jobID,
 		"data":   b.Data,
 		"close":  b.Close,
 	})
@@ -133,7 +133,7 @@ func (s *server) jobStdin(w http.ResponseWriter, r *http.Request) {
 func (s *server) kill(w http.ResponseWriter, r *http.Request) {
 	key := sessionParam(r)
 	jobID := param(r, "jobID")
-	res, err := s.workerCommand(r.Context(), key, "kill", map[string]interface{}{"job_id": jobID})
+	res, err := s.workerCommand(r.Context(), key, "kill", map[string]interface{}{"job-id": jobID})
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return

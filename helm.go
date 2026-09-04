@@ -21,7 +21,7 @@ func writeRawJSON(w http.ResponseWriter, body string) {
 
 // helmInstallBody carries a helm install/upgrade request into the async task.
 type helmInstallBody struct {
-	ReleaseName string                 `json:"release_name"`
+	ReleaseName string                 `json:"release-name"`
 	Chart       string                 `json:"chart"` // local dir path, or chart ref
 	Version     string                 `json:"version,omitempty"`
 	Values      map[string]interface{} `json:"values,omitempty"`
@@ -41,14 +41,14 @@ type helmInstallBody struct {
 // we simply pass org/repo/bookmark/chart_path through.
 func (s *server) startHelmInstall(b helmInstallBody) string {
 	id, err := s.opsSubmitHelm(context.Background(), map[string]interface{}{
-		"release_name": b.ReleaseName,
+		"release-name": b.ReleaseName,
 		"chart":        b.Chart,
 		"version":      b.Version,
 		"values":       b.Values,
 		"org":          b.Org,
 		"repo":         b.Repo,
 		"bookmark":     b.Bookmark,
-		"chart_path":   b.ChartPath,
+		"chart-path":   b.ChartPath,
 	})
 	if err != nil {
 		// jjlab rejections surface as a failed task id-less error; fabricate
