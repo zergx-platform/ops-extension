@@ -33,11 +33,12 @@ type buildBody struct {
 	// revision (bookmark) from the image tag so releases can pin immutable
 	// semver tags (e.g. v0.0.1) instead of the floating :dev. When empty the
 	// historical behavior of tagging by bookmark is preserved.
-	ImageTag   string `json:"image_tag"`
-	Dockerfile string `json:"dockerfile"`
-	Push       bool   `json:"push"`
-	Raw        bool   `json:"raw"`
-	NoCache    bool   `json:"no_cache"`
+	ImageTag   string   `json:"image_tag"`
+	Dockerfile string   `json:"dockerfile"`
+	Push       bool     `json:"push"`
+	Raw        bool     `json:"raw"`
+	NoCache    bool     `json:"no_cache"`
+	BuildArgs  []string `json:"build_args"`
 }
 
 // ImageRefTag returns the image tag to append to the reference, preferring an
@@ -102,6 +103,9 @@ func (s *server) buildImage(w http.ResponseWriter, r *http.Request) {
 		req["containerfile"] = b.Dockerfile
 	} else if b.Dockerfile != "" {
 		req["dockerfile"] = b.Dockerfile
+	}
+	if len(b.BuildArgs) > 0 {
+		req["build_args"] = b.BuildArgs
 	}
 	id, err := s.opsSubmitBuild(r.Context(), req)
 	if err != nil {
