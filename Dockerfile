@@ -3,7 +3,7 @@
 # own directory as the build context (no shared parent context). The Go SDK
 # dependency is resolved from go.mod via jjlab GOPROXY, not copied from a
 # sibling directory.
-ARG REGISTRY=jj-lab.temp.svc.cluster.local
+ARG REGISTRY=docker.io
 ARG NODE_IMAGE=26-alpine
 ARG GO_IMAGE=golang:1.26-alpine
 
