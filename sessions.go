@@ -112,21 +112,21 @@ func (s *server) invalidateWorkspace(sid string) {
 
 // jjBookmarkHead fetches a bookmark's target commit id from jjlab.
 func (s *server) jjBookmarkHead(ctx context.Context, org, repo, bm string) (string, error) {
-	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/branches", s.jj, urlPathEscape(org), urlPathEscape(repo))
+	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/bookmarks", s.jj, urlPathEscape(org), urlPathEscape(repo))
 	body, err := s.httpGetRaw(ctx, u)
 	if err != nil {
-		return "", fmt.Errorf("jj branches %s/%s: %w", org, repo, err)
+		return "", fmt.Errorf("jj bookmarks %s/%s: %w", org, repo, err)
 	}
 	var out struct {
-		Branches []struct {
+		Bookmarks []struct {
 			Name string `json:"name"`
 			Sha  string `json:"sha"`
-		} `json:"branches"`
+		} `json:"bookmarks"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return "", fmt.Errorf("jj branches %s/%s: bad response: %w", org, repo, err)
+		return "", fmt.Errorf("jj bookmarks %s/%s: bad response: %w", org, repo, err)
 	}
-	for _, b := range out.Branches {
+	for _, b := range out.Bookmarks {
 		if b.Name == bm {
 			return b.Sha, nil
 		}

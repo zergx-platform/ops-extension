@@ -54,11 +54,11 @@ func readArchive(data []byte) []string {
 func newFakeJJ(t *testing.T, bookmarks string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/repos/verify/exists/branches", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/repos/verify/exists/bookmarks", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(bookmarks))
 	})
-	mux.HandleFunc("/api/v1/repos/verify/nope/branches", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"branches":[]}`))
+	mux.HandleFunc("/api/v1/repos/verify/nope/bookmarks", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"bookmarks":[]}`))
 	})
 	mux.HandleFunc("/api/v1/repos/verify/ws/", func(w http.ResponseWriter, r *http.Request) {
 		// jjlab tarball is flat: /api/v1/repos/verify/ws/archive/tarball/{rev}
@@ -72,7 +72,7 @@ func newFakeJJ(t *testing.T, bookmarks string) *httptest.Server {
 }
 
 func TestJJBookmarkHead(t *testing.T) {
-	jj := newFakeJJ(t, `{"branches":[{"name":"main","sha":"abc123"}]}`)
+	jj := newFakeJJ(t, `{"bookmarks":[{"name":"main","sha":"abc123"}]}`)
 	defer jj.Close()
 	s := &server{jj: jj.URL, wsCache: map[string]wsCacheEntry{}}
 
@@ -86,7 +86,7 @@ func TestJJBookmarkHead(t *testing.T) {
 }
 
 func TestResolveWorkspaceSessionName(t *testing.T) {
-	jj := newFakeJJ(t, `{"branches":[{"name":"main","sha":"abc123"}]}`)
+	jj := newFakeJJ(t, `{"bookmarks":[{"name":"main","sha":"abc123"}]}`)
 	defer jj.Close()
 	s := &server{jj: jj.URL, wsCache: map[string]wsCacheEntry{}}
 

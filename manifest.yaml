@@ -443,7 +443,7 @@ tools:
             zh: 目标仓库。
         bookmark:
           type: string
-          description: Bookmark (branch) to read or publish from.
+          description: Bookmark to read or publish from.
           descriptions:
             zh: 读取或发布所用的书签（分支）。
         name:

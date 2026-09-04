@@ -859,7 +859,7 @@ func rawMap(v interface{}) map[string]interface{} {
 
 // portFile copies a file (or a whole directory, recursively) from the sandbox
 // into the session's jj repo as ONE atomic change. The workspace bookmark is
-// the destination branch.
+// the destination bookmark.
 //
 //   - single file: reads via worker file_read, then PUTs the repo contents API
 //     with an optimistic-lock base blob sha (a concurrent change is rejected).
@@ -904,9 +904,9 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 		}
 		var resp map[string]interface{}
 		if err := s.httpPostJSONMap(ctx, commitsPath, map[string]interface{}{
-			"branch":  sc.ws.bookmark,
-			"message": message,
-			"actions": []interface{}{action},
+			"bookmark": sc.ws.bookmark,
+			"message":  message,
+			"actions":  []interface{}{action},
 		}, &resp); err != nil {
 			return "", fmt.Errorf("port write failed: %w", err)
 		}
@@ -947,9 +947,9 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 	}
 	var resp map[string]interface{}
 	if err := s.httpPostJSONMap(ctx, commitsPath, map[string]interface{}{
-		"branch":  sc.ws.bookmark,
-		"message": message,
-		"actions": actions,
+		"bookmark": sc.ws.bookmark,
+		"message":  message,
+		"actions":  actions,
 	}, &resp); err != nil {
 		return "", fmt.Errorf("port commit write failed: %w", err)
 	}

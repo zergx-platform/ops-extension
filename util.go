@@ -143,7 +143,7 @@ func (s *server) sandboxFileWrite(ctx context.Context, cid, path string, data []
 // sandboxFileStat stats a sandbox path via the worker file_list RPC (which
 // returns `is_dir` for the path). For a single trailing-slash-less file the
 // list has one entry but is_dir is false, so the flag (not the count) drives
-// the directory branch.
+// the directory bookmark.
 func (s *server) sandboxFileStat(ctx context.Context, cid, path string) (os.FileInfo, error) {
 	res, err := s.workerCommand(ctx, cid, "file_list", map[string]interface{}{"path": path})
 	if err != nil {
