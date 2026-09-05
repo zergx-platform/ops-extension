@@ -41,30 +41,21 @@ type wsCacheEntry struct {
 	expires time.Time
 }
 
-// resolveWorkspace maps a tool call to its workspace. Priority: the
-// first-class `session_name` envelope field ("org:repo:bookmark", verified
-// against jjlab) → legacy `_org`/`_repo`/`_branch` args. ops-extension
-// talks to jjlab only — no repo-extension, no mapping table.
+// resolveWorkspace maps a tool call to its workspace via the first-class
+// `session_name` envelope field ("org:repo:bookmark", verified against jjlab).
+// There is no legacy `_org`/`_repo`/`_bookmark` fallback: the agent always
+// carries the session name, and ops-extension talks to jjlab only.
 func (s *server) resolveWorkspace(ctx context.Context, args map[string]interface{}, sessionName string) (workspace, string, error) {
-	if sessionName != "" {
-		org, repo, bm, ok := parseSessionName(sessionName)
-		if !ok {
-			return workspace{}, "", fmt.Errorf(
-				"session %q is not named org:repo:bookmark — cannot resolve its workspace (rename the session or pass _org/_repo/_branch explicitly)", sessionName)
-		}
-		ws, err := s.lookupWorkspace(ctx, sessionName, org, repo, bm)
-		return ws, sessionName, err
+	if sessionName == "" {
+		return workspace{}, "", fmt.Errorf("missing session context (pass session_name)")
 	}
-	org, repo, bm := strArg(args, "_org"), strArg(args, "_repo"), strArg(args, "_branch")
-	if org == "" || repo == "" {
-		return workspace{}, "", fmt.Errorf("missing session context (pass session_name, or _org/_repo)")
+	org, repo, bm, ok := parseSessionName(sessionName)
+	if !ok {
+		return workspace{}, "", fmt.Errorf(
+			"session %q is not named org:repo:bookmark — cannot resolve its workspace (rename the session)", sessionName)
 	}
-	if bm == "" {
-		bm = "main"
-	}
-	sid := org + ":" + repo + ":" + bm
-	ws, err := s.lookupWorkspace(ctx, sid, org, repo, bm)
-	return ws, sid, err
+	ws, err := s.lookupWorkspace(ctx, sessionName, org, repo, bm)
+	return ws, sessionName, err
 }
 
 // lookupWorkspace resolves the bookmark head via jjlab, with a short

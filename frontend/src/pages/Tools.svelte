@@ -28,7 +28,7 @@
       group: 'Images',
       tools: [
         ['container-build', 'Build a Containerfile from the repo via buildkitd + push'],
-        ['container-deploy', 'Deploy an image as a k8s Deployment (nested resources)'],
+        ['service-deploy', 'Deploy an image as a k8s Deployment (nested resources)'],
         ['image-list', 'List OCI registry images'],
         ['list-containerfile-templates', 'Built-in Containerfile templates'],
       ],

@@ -215,7 +215,7 @@ type ResourcePair struct {
 }
 
 // ResourceRequest is the nested `resources:{requests:{...},limits:{...}}`
-// shape accepted by the deploy API and the container-deploy tool. jjlab
+// shape accepted by the deploy API and the service-deploy tool. jjlab
 // applies CPU/memory to the workload's requests+limits.
 type ResourceRequest struct {
 	Requests *ResourcePair `json:"requests,omitempty"`

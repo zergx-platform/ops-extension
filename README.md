@@ -72,7 +72,7 @@ Sandbox console / Builds / Packages / Tools.
 **Sandbox jobs** — `sandbox-job-list`, `sandbox-job-output`,
 `sandbox-job-wait`, `sandbox-job-stdin`, `sandbox-job-kill`.
 
-**Images** — `container-build`, `container-deploy`, `image-list`,
+**Images** — `container-build`, `service-deploy`, `image-list`,
 `list-containerfile-templates`.
 
 **Packages** — `package-publish` (14 protocols), `list-registry-packages`.

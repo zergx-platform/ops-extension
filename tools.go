@@ -29,7 +29,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				image := strArg(args, "image")
 				if image == "" {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-create: missing 'image' (base image jjlab can pull)")
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-create: missing 'image' (base image jjlab can pull)", "sandbox-create：缺少 'image'（jjlab 可拉取的基础镜像）")
 				}
 				_, sid, err := s.resolveWorkspace(ctx, args, sessionName)
 				if err != nil {
@@ -37,7 +37,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				info, err := s.createWorker(ctx, sid, image)
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-create failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-create failed: %v", "sandbox-create 失败：%v", err)
 				}
 				s.publishSandboxVars(ctx, sid, info)
 				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName,
@@ -49,7 +49,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				command := strArg(args, "command")
 				if command == "" {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-run: missing 'command'")
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run: missing 'command'", "sandbox-run：缺少 'command'")
 				}
 				sc, err := s.ensureSandbox(ctx, args, sessionName, true)
 				if err != nil {
@@ -76,11 +76,11 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 						}
 						if res, err = run(sc.ws.rev); err != nil {
 							if res, err = run(""); err != nil {
-								return extension.ToolResultData{}, fmt.Errorf("sandbox-run failed: %w", err)
+								return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run failed: %v", "sandbox-run 失败：%v", err)
 							}
 						}
 					} else {
-						return extension.ToolResultData{}, fmt.Errorf("sandbox-run failed: %w", err)
+						return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run failed: %v", "sandbox-run 失败：%v", err)
 					}
 				}
 
@@ -110,7 +110,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				select {
 				case sr := <-resultCh:
 					if sr.err != nil && !errors.Is(sr.err, context.DeadlineExceeded) {
-						return extension.ToolResultData{}, fmt.Errorf("sandbox-run stream failed: %w", sr.err)
+						return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-run stream failed: %v", "sandbox-run 流失败：%v", sr.err)
 					}
 					content := fmt.Sprintf("Command completed (job %s, exit %d)", res.JobID, sr.done.ExitCode)
 					if sr.done.Stdout != "" {
@@ -175,7 +175,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				data, err := s.sandboxFileRead(ctx, sc.cid, path)
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-read failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-read failed: %v", "sandbox-read 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: string(data)}, nil
 			},
@@ -185,7 +185,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				code := strArg(args, "code")
 				path := strArg(args, "path")
 				if code == "" || path == "" {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-download: 'code' and 'path' are required")
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-download: 'code' and 'path' are required", "sandbox-download：'code' 与 'path' 均为必填")
 				}
 				sc, err := s.ensureSandbox(ctx, args, sessionName, false)
 				if err != nil {
@@ -193,10 +193,10 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				data, err := s.fetchAgentFile(ctx, code)
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-download: download %s: %w", code, err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-download: download %s: %v", "sandbox-download：下载 %s：%v", code, err)
 				}
 				if err := s.sandboxFileWrite(ctx, sc.cid, path, data); err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-download failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-download failed: %v", "sandbox-download 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Downloaded file %s → sandbox path '%s' (%d bytes).", code, path, len(data)), fmt.Sprintf("已将文件 %s 下载到沙箱路径 '%s'（%d 字节）。", code, path, len(data)))}, nil
 			},
@@ -209,7 +209,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					return extension.ToolResultData{}, err
 				}
 				if err := s.sandboxFileWrite(ctx, sc.cid, path, []byte(strArg(args, "content"))); err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-write failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-write failed: %v", "sandbox-write 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Wrote sandbox file '%s'.", path), fmt.Sprintf("已写入沙箱文件 '%s'。", path))}, nil
 			},
@@ -224,7 +224,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
-				v, err := s.sandboxEdit(ctx, sc.cid, path, startLine, endLine, content)
+				v, err := s.sandboxEdit(ctx, sessionName, sc.cid, path, startLine, endLine, content)
 				return extension.ToolResultData{Content: v}, err
 			},
 		},
@@ -236,7 +236,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "jobs", map[string]interface{}{})
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-list failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-list failed: %v", "sandbox-job-list 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: toJSON(res)}, nil
 			},
@@ -249,7 +249,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "job_output", jobArgs(args))
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-output failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-output failed: %v", "sandbox-job-output 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: toJSON(res)}, nil
 			},
@@ -262,7 +262,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				res, err := s.workerCommand(ctx, sc.cid, "job_wait", jobArgs(args))
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-wait failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-wait failed: %v", "sandbox-job-wait 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: toJSON(res)}, nil
 			},
@@ -278,7 +278,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					"data":   strArg(args, "data"),
 				})
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-stdin failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-stdin failed: %v", "sandbox-job-stdin 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: toJSON(res)}, nil
 			},
@@ -293,7 +293,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 					"job_id": strArg(args, "job-id"),
 				})
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("sandbox-job-kill failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "sandbox-job-kill failed: %v", "sandbox-job-kill 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: toJSON(res)}, nil
 			},
@@ -304,7 +304,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err != nil {
 					return extension.ToolResultData{}, err
 				}
-				v, err := s.portFile(ctx, sc, args)
+				v, err := s.portFile(ctx, sessionName, sc, args)
 				if err == nil {
 					// The bookmark moved: forget the cached head so the next
 					// call re-syncs and observes the ported file.
@@ -321,7 +321,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				image := strArg(args, "tag")
 				if image == "" {
-					return extension.ToolResultData{}, fmt.Errorf("container-build: missing 'tag' (image name)")
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-build: missing 'tag' (image name)", "container-build：缺少 'tag'（镜像名）")
 				}
 				// Tag defaults to the session bookmark (matching container-build's
 				// historical {tag}:{bookmark}); an explicit image_tag overrides it.
@@ -343,13 +343,13 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				id, err := s.opsSubmitBuild(ctx, payload)
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("container-build failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-build failed: %v", "container-build 失败：%v", err)
 				}
 				out, err := s.awaitOpsTaskProgress(ctx, "build", fullImage, id, callID)
 				return extension.ToolResultData{Content: out}, err
 			},
 		},
-		"container-deploy": {
+		"service-deploy": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				image := strArg(args, "image")
 				name := strArg(args, "name")
@@ -379,7 +379,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				if err == nil && existing != nil {
 					owner, _ := existing["session"].(string)
 					if owner != "" && owner != sessionName {
-						return extension.ToolResultData{}, fmt.Errorf("service '%s' belongs to a different session (%s); use another name", name, owner)
+						return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "service '%s' belongs to a different session (%s); use another name", "服务 '%s' 属于其它会话（%s）；请换一个名字", name, owner)
 					}
 				}
 				image = s.qualifyImage(image, defaultTag)
@@ -417,7 +417,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				body["namespace"] = s.runtimeNamespace
 				resp, err := s.httpPostJSON(ctx, s.jj+"/api/v1/ops/services", body)
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("container-deploy failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "service-deploy failed: %v", "service-deploy 失败：%v", err)
 				}
 				// Surface the service's in-cluster DNS address + readiness so the
 				// sandbox (same runtime namespace) can reach it by name, and the
@@ -461,7 +461,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				v, err := s.httpGetJSON(ctx, u)
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("container-search failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "container-search failed: %v", "container-search 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: v}, nil
 			},
@@ -478,7 +478,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				v, err := s.httpGetJSON(ctx, u)
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("service-list failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "service-list failed: %v", "service-list 失败：%v", err)
 				}
 				if !all && sessionName != "" {
 					if _, _, _, ok := tryParseSession(sessionName); ok && v != "" {
@@ -501,7 +501,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				release := strArg(args, "release-name")
 				if release == "" {
-					return extension.ToolResultData{}, fmt.Errorf("helm-install: missing 'release_name'")
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "helm-install: missing 'release_name'", "helm-install：缺少 'release_name'")
 				}
 				// chart_path is repo-relative; jjlab materializes an absolute
 				// chart directory from the session's workspace when we pass the
@@ -527,7 +527,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				id, err := s.opsSubmitHelm(ctx, payload)
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("helm-install failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "helm-install failed: %v", "helm-install 失败：%v", err)
 				}
 				out, err := s.awaitOpsTask(ctx, "helm", release, id, callID)
 				return extension.ToolResultData{Content: out}, err
@@ -543,7 +543,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				name := strArg(args, "release-name")
 				if name == "" {
-					return extension.ToolResultData{}, fmt.Errorf("helm-status: missing 'release_name'")
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "helm-status: missing 'release_name'", "helm-status：缺少 'release_name'")
 				}
 				v, err := s.httpGetJSON(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)+"?namespace="+url.QueryEscape(s.runtimeNamespace))
 				return extension.ToolResultData{Content: v}, err
@@ -553,10 +553,10 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				name := strArg(args, "release-name")
 				if name == "" {
-					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall: missing 'release_name'")
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "helm-uninstall: missing 'release_name'", "helm-uninstall：缺少 'release_name'")
 				}
 				if err := s.httpDelete(ctx, s.jj+"/api/v1/ops/helm/releases/"+urlPathEscape(name)+"?namespace="+url.QueryEscape(s.runtimeNamespace)); err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("helm-uninstall failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "helm-uninstall failed: %v", "helm-uninstall 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: lc(ctx, s.ext, sessionName, fmt.Sprintf("Uninstalled helm release %q", name), fmt.Sprintf("已卸载 Helm release %q", name))}, nil
 			},
@@ -583,7 +583,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				return extension.ToolResultData{Content: res}, err
 			},
 		},
-		"packages-search": {
+		"package-search": {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				u := s.jj + "/api/v1/ops/packages"
 				if p := strArg(args, "protocol"); p != "" {
@@ -591,7 +591,7 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 				}
 				v, err := s.httpGetJSON(ctx, u)
 				if err != nil {
-					return extension.ToolResultData{}, fmt.Errorf("packages-search failed: %w", err)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "package-search failed: %v", "package-search 失败：%v", err)
 				}
 				return extension.ToolResultData{Content: v}, nil
 			},
@@ -600,11 +600,11 @@ func (s *server) handlers() map[string]extension.ToolSpec {
 			Execute: func(ctx context.Context, args map[string]interface{}, callID string, sessionName string) (extension.ToolResultData, error) {
 				gitURL := strArg(args, "git-url")
 				if gitURL == "" {
-					return extension.ToolResultData{}, fmt.Errorf("pull-git-repo: missing 'git_url'")
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "pull-git-repo: missing 'git_url'", "pull-git-repo：缺少 'git_url'")
 				}
 				repo := inferRepoFromGitURL(gitURL)
 				if repo == "" {
-					return extension.ToolResultData{}, fmt.Errorf("cannot infer repo name from %s", gitURL)
+					return extension.ToolResultData{}, ef(ctx, s.ext, sessionName, "cannot infer repo name from %s", "无法从 %s 推导仓库名", gitURL)
 				}
 				org := strArg(args, "org")
 				if org == "" {
@@ -775,7 +775,7 @@ func boolArg(args map[string]interface{}, k string) bool {
 }
 
 // envMapFromArgs lifts a flat set of args into a string→string env map for the
-// container-deploy service spec.
+// service-deploy service spec.
 func envMapFromArgs(args map[string]interface{}) map[string]string {
 	if raw, ok := args["env"].(map[string]interface{}); ok {
 		out := map[string]string{}
@@ -806,10 +806,10 @@ var _ = strings.TrimSpace
 // sandboxEdit implements edit as read-modify-write over the worker sandbox
 // using the native file_read/file_write RPCs (the minimal worker shell has no
 // pipes/redirection).
-func (s *server) sandboxEdit(ctx context.Context, cid, path string, startLine, endLine int64, content string) (string, error) {
+func (s *server) sandboxEdit(ctx context.Context, sessionName, cid, path string, startLine, endLine int64, content string) (string, error) {
 	data, err := s.sandboxFileRead(ctx, cid, path)
 	if err != nil {
-		return "", fmt.Errorf("sandbox edit read failed: %w", err)
+		return "", ef(ctx, s.ext, sessionName, "sandbox edit read failed: %v", "sandbox 编辑读取失败：%v", err)
 	}
 	current := string(data)
 	lines := strings.Split(current, "\n")
@@ -844,7 +844,7 @@ func (s *server) sandboxEdit(ctx context.Context, cid, path string, startLine, e
 	}
 	newContent := strings.Join(lines, "\n")
 	if err := s.sandboxFileWrite(ctx, cid, path, []byte(newContent)); err != nil {
-		return "", fmt.Errorf("sandbox edit write failed: %w", err)
+		return "", ef(ctx, s.ext, sessionName, "sandbox edit write failed: %v", "sandbox 编辑写入失败：%v", err)
 	}
 	return fmt.Sprintf("Edited sandbox file '%s'.", path), nil
 }
@@ -867,7 +867,7 @@ func rawMap(v interface{}) map[string]interface{} {
 //     file, then POSTs `batch` (atomic, single change id).
 //
 // On success the change id is returned so the agent can track/review the edit.
-func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]interface{}) (string, error) {
+func (s *server) portFile(ctx context.Context, sessionName string, sc sandboxCtx, args map[string]interface{}) (string, error) {
 	sandboxPath := strArg(args, "sandbox-path")
 	repoPath := strArg(args, "repo-path")
 	message := strArg(args, "message")
@@ -881,18 +881,18 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 	// Determine whether sandbox_path is a directory.
 	info, err := s.sandboxFileStat(ctx, sc.cid, sandboxPath)
 	if err != nil {
-		return "", fmt.Errorf("port sandbox stat failed: %w", err)
+		return "", ef(ctx, s.ext, sessionName, "port sandbox stat failed: %v", "沙箱 stat 失败：%v", err)
 	}
 
 	if !info.IsDir() {
 		// Single file: read + optimistic-lock commit (one action).
 		data, err := s.sandboxFileRead(ctx, sc.cid, sandboxPath)
 		if err != nil {
-			return "", fmt.Errorf("port sandbox read failed: %w", err)
+			return "", ef(ctx, s.ext, sessionName, "port sandbox read failed: %v", "沙箱读取失败：%v", err)
 		}
 		sha, err := s.repoBlobSha(ctx, sc.ws.org, sc.ws.repo, repoPath, sc.ws.bookmark)
 		if err != nil && !errors.Is(err, errNotFoundForHTTP) {
-			return "", fmt.Errorf("port read repo sha failed: %w", err)
+			return "", ef(ctx, s.ext, sessionName, "port read repo sha failed: %v", "读取仓库 sha 失败：%v", err)
 		}
 		action := map[string]interface{}{
 			"action":         "update",
@@ -908,7 +908,7 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 			"message":  message,
 			"actions":  []interface{}{action},
 		}, &resp); err != nil {
-			return "", fmt.Errorf("port write failed: %w", err)
+			return "", ef(ctx, s.ext, sessionName, "port write failed: %v", "沙箱写入失败：%v", err)
 		}
 		changeID := strField(resp, "change_id")
 		if changeID == "" {
@@ -920,10 +920,10 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 	// Directory: expand via worker file_list, then one atomic commit (multi-action).
 	files, err := s.sandboxFileList(ctx, sc.cid, sandboxPath)
 	if err != nil {
-		return "", fmt.Errorf("port sandbox list failed: %w", err)
+		return "", ef(ctx, s.ext, sessionName, "port sandbox list failed: %v", "沙箱列表失败：%v", err)
 	}
 	if len(files) == 0 {
-		return "", fmt.Errorf("port sandbox directory '%s' is empty", sandboxPath)
+		return "", ef(ctx, s.ext, sessionName, "port sandbox directory '%s' is empty", "沙箱目录 '%s' 为空", sandboxPath)
 	}
 	actions := make([]map[string]interface{}, 0, len(files))
 	for _, f := range files {
@@ -937,7 +937,7 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 		contentBase64, _ := f["content"].(string)
 		sha, serr := s.repoBlobSha(ctx, sc.ws.org, sc.ws.repo, target, sc.ws.bookmark)
 		if serr != nil && !errors.Is(serr, errNotFoundForHTTP) {
-			return "", fmt.Errorf("port read repo sha failed: %w", serr)
+			return "", ef(ctx, s.ext, sessionName, "port read repo sha failed: %v", "读取仓库 sha 失败：%v", serr)
 		}
 		action := map[string]interface{}{"action": "update", "path": target, "content_base64": contentBase64}
 		if sha != "" {
@@ -951,7 +951,7 @@ func (s *server) portFile(ctx context.Context, sc sandboxCtx, args map[string]in
 		"message":  message,
 		"actions":  actions,
 	}, &resp); err != nil {
-		return "", fmt.Errorf("port commit write failed: %w", err)
+		return "", ef(ctx, s.ext, sessionName, "port commit write failed: %v", "提交写入失败：%v", err)
 	}
 	changeID := strField(resp, "change_id")
 	if changeID == "" {

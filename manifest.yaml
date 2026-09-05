@@ -251,7 +251,7 @@ tools:
           descriptions:
             zh: 跳过层缓存（从零构建）。
       required: [dockerfile-path, tag]
-  - name: container-deploy
+  - name: service-deploy
     description: Deploy a container image as a Kubernetes deployment (with optional nested resource requests/limits). On success returns the service's in-cluster DNS hostname (<name>.<namespace>.svc.cluster.local) so the sandbox can reach it by name.
     descriptions:
       zh: 将容器镜像部署为 Kubernetes Deployment（可带嵌套的 resource requests/limits）。成功后返回服务的集群内 DNS 主机名（<name>.<namespace>.svc.cluster.local），沙箱可直接用该主机名访问。
@@ -467,7 +467,7 @@ tools:
           descriptions:
             zh: Dockerfile 的仓库相对路径（默认 ./Dockerfile）。
       required: [protocol]
-  - name: packages-search
+  - name: package-search
     description: Search packages and their versions stored in the artifact registry (all protocols, incl. git releases stored as format=release).
     descriptions:
       zh: 检索 artifact registry 中存储的包与版本（全部协议，含以 format=release 存储的 git release）。

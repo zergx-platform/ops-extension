@@ -75,7 +75,16 @@ func (s *server) sandboxesList(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]interface{}{}
 	for _, svc := range list {
 		name, _ := svc["name"].(string)
-		session, _ := svc["session"].(string)
+		// The session association lives in the `zergx/session` annotation, not
+		// in a top-level `session` field (jjlab ListServices returns the
+		// annotations verbatim). Read it the same way filterServicesBySession
+		// does, so the UI can bind a sandbox to its session.
+		session := ""
+		if ann, ok := svc["annotations"].(map[string]interface{}); ok {
+			if s, ok := ann["zergx/session"].(string); ok {
+				session = s
+			}
+		}
 		out = append(out, map[string]interface{}{
 			"container_id": name,
 			"session":      session,
